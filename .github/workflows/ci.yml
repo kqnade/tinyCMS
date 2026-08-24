@@ -41,8 +41,6 @@ jobs:
     name: Renovate config
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    container:
-      image: ghcr.io/renovatebot/renovate:44.41.0@sha256:98c8add98a9ae56c7ffaf16b7ce73decce03bbf17fb1cece248c18b1a7bebcd2
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -50,4 +48,6 @@ jobs:
           persist-credentials: false
 
       - name: Validate Renovate configuration
-        run: renovate-config-validator --strict renovate.json5
+        uses: docker://ghcr.io/renovatebot/renovate:44.41.0@sha256:98c8add98a9ae56c7ffaf16b7ce73decce03bbf17fb1cece248c18b1a7bebcd2
+        with:
+          args: renovate-config-validator --strict renovate.json5
