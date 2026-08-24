@@ -1,0 +1,16 @@
+{
+  "name": "@tinycms/admin-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir ../../dist/admin-worker",
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "typecheck": "wrangler types --include-runtime false --check && tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tinycms/contracts": "workspace:*",
+    "hono": "4.13.2"
+  }
+}

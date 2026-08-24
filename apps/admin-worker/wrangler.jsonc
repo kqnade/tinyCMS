@@ -1,0 +1,11 @@
+{
+  "name": "tinycms-admin-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-24",
+  "workers_dev": false,
+  "preview_urls": false,
+  "minify": true,
+  "vars": {
+    "ADMIN_HOST": "localhost"
+  }
+}
