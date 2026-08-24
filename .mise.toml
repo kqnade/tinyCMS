@@ -2,3 +2,15 @@
 node = "24.19.0"
 pnpm = "11.22.0"
 "npm:wrangler" = "4.125.0"
+
+[tasks.install]
+description = "Install the locked workspace dependencies"
+run = "pnpm install --frozen-lockfile"
+
+[tasks.check]
+description = "Run all repository checks"
+run = "pnpm check"
+
+[tasks.dev]
+description = "Run all development applications"
+run = "pnpm dev"

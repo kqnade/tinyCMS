@@ -1,0 +1,25 @@
+{
+  "name": "tinycms",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": "24.19.0",
+    "pnpm": "11.22.0"
+  },
+  "scripts": {
+    "build": "pnpm --recursive --if-present run build",
+    "check": "pnpm check:format && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check:format": "biome format .",
+    "dev": "pnpm --parallel --filter './apps/*' --if-present run dev",
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "test": "pnpm --recursive --if-present run test",
+    "typecheck": "pnpm --recursive --if-present run typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.10",
+    "typescript": "7.0.2"
+  }
+}
