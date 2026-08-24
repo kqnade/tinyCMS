@@ -1,40 +1,76 @@
 # tinyCMS
 
-tinyCMS is a single-site publishing system designed for Cloudflare Workers and a quiet, readable blog experience. It is intended to combine a low-friction writing interface with D1, R2, KV, Durable Objects, Vectorize, and Workers AI.
+tinyCMS is an edge-native, single-site publishing system for Cloudflare. It aims to combine a low-friction authoring experience with a quiet, readable public blog.
 
-> [!IMPORTANT]
-> The repository currently contains the architecture and development foundation only. No runnable Worker application has been implemented yet. See the [design snapshot](.dev/designdoc/tinycms.md) for the planned scope and unresolved decisions.
+The repository currently provides a runnable development foundation:
 
-## Development environment
+- separate Hono Workers for public and administrative traffic;
+- a React and Vite Studio shell;
+- shared HTTP response contracts;
+- tests running in Cloudflare's local `workerd` runtime;
+- strict TypeScript, Biome, pinned mise tools, Renovate, and least-privilege CI.
 
-[mise](https://mise.jdx.dev/) installs the project versions of Node.js, pnpm, and Wrangler.
+It is not yet a usable CMS. Storage bindings, editorial workflows, Access JWT verification, publishing, search, likes, and AI assistance remain to be implemented. The planned scope and security model are recorded in the [design snapshot](.dev/designdoc/tinycms.md).
+
+## Applications
+
+| Application | Local URL | Current behavior |
+| --- | --- | --- |
+| Public Worker | `http://127.0.0.1:8787` | Hono health endpoint and public-only routing boundary |
+| Admin Worker | `http://127.0.0.1:8788` | Hono health endpoint restricted to the configured host |
+| Studio | `http://127.0.0.1:5173` | React application shell with light and dark themes |
+
+## Development
+
+[mise](https://mise.jdx.dev/) installs the repository versions of Node.js, pnpm, and Wrangler.
 
 ```sh
 mise trust
 mise install
-mise exec -- node --version
-mise exec -- pnpm --version
-mise exec -- wrangler --version
+mise run install
+mise run dev
 ```
 
-Tool versions and checksums are recorded in [`.mise.toml`](.mise.toml) and [`mise.lock`](mise.lock). Application commands will be added with the Worker scaffold.
+The development servers bind only to `127.0.0.1`. Verify the Worker endpoints with:
 
-## Local configuration
+```sh
+curl http://127.0.0.1:8787/healthz
+curl -H 'Host: localhost' http://127.0.0.1:8788/healthz
+```
 
-Local Cloudflare state, dependencies, build output, and dotenv files are excluded from Git. Commit only example files such as `.env.example` or `.dev.vars.example`; never commit credentials or production resource identifiers.
+Run the complete local quality gate with:
 
-Development will follow three verification levels:
+```sh
+mise run check
+```
 
-1. Wrangler with local simulated bindings.
-2. Local Worker code with isolated development AI and Vectorize remote bindings.
-3. A Cloudflare staging environment for Access, routes, and network behavior.
+This checks formatting, lint, generated Worker types, TypeScript, unit and `workerd` tests, the Studio production bundle, and Wrangler dry-run bundles. No command in the default check or build flow deploys a Worker.
 
-Production resources must not be used as local remote bindings.
+## Configuration
 
-## Dependency updates
+The tracked `wrangler.jsonc` files contain development-safe defaults and no Cloudflare resource identifiers. Wrangler generates `worker-configuration.d.ts`; rerun the following command from an affected Worker directory after changing its bindings:
 
-Renovate checks for normal updates daily after a one-day release age. Vulnerability fixes bypass the schedule and release-age delay. GitHub-native squash automerge remains subject to repository review and required-check rules.
+```sh
+mise exec -- wrangler types --include-runtime false
+```
 
-## Repository guidance
+Dotenv files and `.dev.vars` files are ignored. Commit an example file only when the application consumes the corresponding value, and include placeholders rather than credentials. Production identifiers, account-specific routes, and secrets must not be added to the public template.
 
-Contributor and automation instructions are in [`AGENTS.md`](AGENTS.md).
+Cloudflare deployment, remote migrations, resource provisioning, and secret changes are intentionally outside the local development flow. They require an explicit environment-specific action.
+
+## Repository layout
+
+```text
+apps/
+  admin-worker/
+  public-worker/
+  studio/
+packages/
+  contracts/
+```
+
+Additional package boundaries will be introduced with the behavior that needs them. See [CONTRIBUTING.md](CONTRIBUTING.md) for development rules and [SECURITY.md](SECURITY.md) for the current security boundary.
+
+## License
+
+A license has not yet been selected. Do not assume permission beyond the rights granted by applicable law until a license file is added.
