@@ -1,15 +1,15 @@
 Record schema: context-handoff/v1
 Task key: tinycms-design
-Repository identity method: git-common-dir hash 700f6c40d45a5ac3eab32b31ff05f419e4cdd4f06e4e6266df0c5db5f02570f1
+Repository identity method: remote.origin.url hash 7f19382b0723d0eeac7cb718caa6bbd4ee620a756036545e1d3017b9ff1d9d8d
 Repository state key: repository-local:.dev
 Resolved workflow state root: /Users/kanato.momose/repos/github.com/kqnade/tinyCMS/.dev
 Repository root at write: /Users/kanato.momose/repos/github.com/kqnade/tinyCMS
 Source worktree: /Users/kanato.momose/repos/github.com/kqnade/tinyCMS
 Source ref: refs/heads/main
-Source commit: unborn (no commit exists; git rev-parse --verify HEAD exited 128)
-Dirty worktree: no at source snapshot; this export adds only .dev/designdoc/tinycms.md
+Source commit: 6457a497eed2c960e12a108c889cbe94737bbb16
+Dirty worktree: no at source snapshot; this export updates only .dev/designdoc/tinycms.md
 Created: 2026-08-24T19:00:00+09:00
-Updated: 2026-08-24T19:00:00+09:00
+Updated: 2026-08-24T19:34:30+09:00
 Producing client: Codex
 
 # tinyCMS design snapshot
@@ -22,7 +22,7 @@ Producing client: Codex
 - **User:** Adopt the recommended Cloudflare capabilities, AI authoring assistance, hybrid vector search, and email for inbound routing and administrator alerts.
 - **User:** Do not implement public comments or public email update subscriptions.
 - **User:** No product-code, configuration, infrastructure, dependency, commit, or provisioning changes are authorized until the complete architecture is approved. Only this .dev record is authorized now.
-- **Observed:** The repository has no remote, no commits, and no source files.
+- **Observed:** The repository has an authorized `kqnade/tinyCMS` origin and one documentation commit; no application or infrastructure files exist.
 - **Observed:** The directory was renamed from tinyworld to tinyCMS; the current path above is authoritative.
 - **Decision:** This record is an architecture proposal and implementation handoff, not implementation authorization.
 - **Unverified:** Production domains, branding, Cloudflare identifiers, and exact Terraform provider coverage are not yet known.
@@ -496,6 +496,37 @@ The design may be inspired by quiet personal publishing but must not copy anothe
 - **Decision:** Provider and Wrangler versions are pinned; credentials and state secrets are never committed.
 - **Unverified:** Exact provider coverage for Vectorize, Email event subscriptions, Workflows, and all bindings must be checked. Unsupported resources remain Wrangler/API-owned, never double-owned.
 
+## Local development and verification
+
+- **Decision:** Develop against the local `workerd` runtime through Wrangler and Miniflare before publishing the repository or deploying production.
+- **Decision:** Use three verification levels: fully local, local Worker code with selected remote bindings, and an isolated Cloudflare staging deployment.
+- **Decision:** `wrangler dev` is the normal development server. `wrangler dev --local` is the explicit offline-safe mode that disables configured remote bindings.
+- **Decision:** Local D1, KV, R2, Durable Objects, Queues, Workflows, Static Assets, and Service Bindings use the same Worker binding APIs as production and cover normal CMS development.
+- **Decision:** Apply D1 migrations to local state with `wrangler d1 migrations apply CMS_DB --local`. Persisted Wrangler development state remains ignored by Git.
+- **Decision:** Workers AI and Vectorize have no local simulation. Bind only isolated development resources with `remote: true`; never connect ordinary local development to production data.
+- **Decision:** Prefer per-binding remote connections over the legacy all-remote `wrangler dev --remote` mode.
+- **Decision:** Remote binding writes affect real Cloudflare resources and may be billable. Development bindings, indexes, buckets, databases, and queues remain separate from production.
+- **Decision:** Test Cron handlers without waiting for wall-clock time by running `wrangler dev --test-scheduled` and calling `/__scheduled` with the intended cron expression, for example `/__scheduled?cron=*/10+*+*+*+*`.
+- **Decision:** Test Access JWT verification, authorization failures, and host fencing locally with deterministic fixtures. Verify the actual Access policy, custom domains, TLS, CDN behavior, email delivery, and Cloudflare network limits in staging.
+
+Verification flow:
+
+~~~text
+Wrangler fully local
+  Worker + simulated bindings
+          |
+          v
+Wrangler hybrid
+  local Worker + development AI/Vectorize remote bindings
+          |
+          v
+Cloudflare staging
+  isolated resources + Access + routes + network behavior
+          |
+          v
+Production
+~~~
+
 ## Cost and abuse guardrails
 
 Expected baseline is Workers Paid minimum account billing plus the domain.
@@ -600,14 +631,14 @@ The implementation is large and must be routed into isolated, independently veri
 
 ## Git evidence
 
-- **Observed:** git remote -v produced no entries after the rename.
-- **Observed:** git status reported an initial main branch with no source changes before export.
-- **Observed:** git rev-parse --verify HEAD failed because no commit exists.
-- **Observed:** No repository AGENTS.md, active TODO, README, package manifest, application, test, or infrastructure file existed.
-- **Observed:** A prior git cc attempt rejected the empty staged set and created no commit or file.
+- **Observed, initial export:** `git remote -v` produced no entries after the rename; `git rev-parse --verify HEAD` failed because no commit existed.
+- **Observed, initial export:** No repository AGENTS.md, active TODO, README, package manifest, application, test, or infrastructure file existed.
+- **Observed, initial export:** A prior `git cc` attempt rejected the empty staged set and created no commit or file.
+- **Observed, current export:** `git rev-parse HEAD` returned `6457a497eed2c960e12a108c889cbe94737bbb16` on `refs/heads/main`.
+- **Observed, current export:** `git status --porcelain=v2 --branch` reported `main` aligned with `origin/main` and no worktree changes before this update.
+- **Observed, current export:** `git remote -v` identifies the authorized `kqnade/tinyCMS` origin.
 - **Observed:** No implementation or test has run.
-- **Decision:** The final managed changed path from this export is .dev/designdoc/tinycms.md.
-- **Unverified:** With no source commit, future imports must reconcile this record against current files.
+- **Decision:** The only changed path from this export is `.dev/designdoc/tinycms.md`.
 
 ## Resolved contradictions
 
@@ -683,6 +714,10 @@ Cloudflare:
 - https://developers.cloudflare.com/analytics/analytics-engine/
 - https://developers.cloudflare.com/workers/observability/logs/workers-logs/
 - https://developers.cloudflare.com/workers/configuration/cron-triggers/
+- https://developers.cloudflare.com/workers/local-development/
+- https://developers.cloudflare.com/workers/local-development/bindings-per-env/
+- https://developers.cloudflare.com/workers/wrangler/commands/workers/
+- https://developers.cloudflare.com/workers-ai/get-started/workers-wrangler/
 - https://developers.cloudflare.com/email-service/platform/pricing/
 - https://developers.cloudflare.com/email-service/platform/limits/
 - https://developers.cloudflare.com/queues/event-subscriptions/events-schemas/
