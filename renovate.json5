@@ -1,0 +1,62 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    "helpers:pinGitHubActionDigestsToSemver",
+    "schedule:daily"
+  ],
+  "minimumReleaseAge": "1 day",
+  "timezone": "Asia/Tokyo",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": [],
+    "minimumReleaseAge": null,
+    "prCreation": "immediate"
+  },
+  "osvVulnerabilityAlerts": true,
+  "reviewersFromCodeOwners": true,
+  "automerge": true,
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "platformAutomerge": true,
+  "lockFileMaintenance": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "Wait one day before proposing normal dependency updates.",
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch",
+        "pin",
+        "digest",
+        "lockFileMaintenance"
+      ],
+      "minimumReleaseAge": "1 day"
+    },
+    {
+      "description": "Create security updates immediately.",
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "matchJsonata": [
+        "$exists(vulnerabilityFixVersion) or isVulnerabilityAlert"
+      ],
+      "schedule": [],
+      "minimumReleaseAge": null,
+      "prCreation": "immediate"
+    },
+    {
+      "description": "Pin container images to immutable digests.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "pinDigests": true
+    }
+  ]
+}
