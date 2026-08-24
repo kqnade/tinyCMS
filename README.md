@@ -73,4 +73,4 @@ Additional package boundaries will be introduced with the behavior that needs th
 
 ## License
 
-A license has not yet been selected. Do not assume permission beyond the rights granted by applicable law until a license file is added.
+tinyCMS is available under the [MIT License](LICENSE).
