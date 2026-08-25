@@ -1,3 +1,5 @@
+export type { HtmlRenderOptions, MediaUrlResolver } from "./html";
+export { renderHtml } from "./html";
 export type {
   ContentDocument,
   ContentValidationIssue,
