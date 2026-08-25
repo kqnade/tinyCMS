@@ -1,10 +1,11 @@
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { authors, postRevisions, posts, schema } from "./schema";
+import { authors, postRevisions, posts, schema, type searchChunks } from "./schema";
 
 export type Author = typeof authors.$inferSelect;
 export type Post = typeof posts.$inferSelect;
 export type PostRevision = typeof postRevisions.$inferSelect;
+export type SearchChunk = typeof searchChunks.$inferSelect;
 
 export const RepositoryErrorCode = {
   NOT_FOUND: "NOT_FOUND",
@@ -82,6 +83,8 @@ export interface EditorialRepository {
   getPostBySlug(slug: string): Promise<Post>;
   getRevision(id: string): Promise<PostRevision>;
   getPostAggregate(id: string): Promise<PostAggregate>;
+  purgePost(id: string): Promise<void>;
+  searchChunks(query: string): Promise<SearchChunk[]>;
 }
 
 const readOne = async <T>(query: PromiseLike<T[]>, resource: string): Promise<T> => {
@@ -118,23 +121,85 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       "post revision",
     );
 
-  const getPostAggregate = async (id: string): Promise<PostAggregate> => {
-    const post = await getPost(id);
-    let revisions: PostRevision[];
+  const searchChunksByQuery = async (query: string): Promise<SearchChunk[]> => {
+    const normalized = query.trim();
+    if (normalized === "") {
+      return [];
+    }
+
     try {
-      revisions = await db
-        .select()
-        .from(postRevisions)
-        .where(eq(postRevisions.postId, post.id))
-        .orderBy(asc(postRevisions.version));
+      if ([...normalized].length >= 3) {
+        const matchQuery = `"${normalized.replaceAll('"', '""')}"`;
+        const result = await database
+          .prepare(
+            "SELECT search_chunks.id, search_chunks.post_id, search_chunks.revision_id, search_chunks.chunk_index, search_chunks.title, search_chunks.heading, search_chunks.body, search_chunks.tags, search_chunks.created_at FROM search_chunks JOIN search_chunks_fts ON search_chunks_fts.rowid = search_chunks.rowid WHERE search_chunks_fts MATCH ? ORDER BY search_chunks.rowid",
+          )
+          .bind(matchQuery)
+          .all<SearchChunk>();
+        return result.results;
+      }
+
+      const likeQuery = normalized
+        .replaceAll("\\", "\\\\")
+        .replaceAll("%", "\\%")
+        .replaceAll("_", "\\_");
+      const result = await database
+        .prepare(
+          "SELECT id, post_id, revision_id, chunk_index, title, heading, body, tags, created_at FROM search_chunks WHERE title LIKE '%' || ? || '%' ESCAPE '\\' OR heading LIKE '%' || ? || '%' ESCAPE '\\' OR body LIKE '%' || ? || '%' ESCAPE '\\' OR tags LIKE '%' || ? || '%' ESCAPE '\\' ORDER BY rowid",
+        )
+        .bind(likeQuery, likeQuery, likeQuery, likeQuery)
+        .all<SearchChunk>();
+      return result.results;
+    } catch (cause) {
+      throw new RepositoryError(RepositoryErrorCode.READ_FAILED, "Failed to search chunks", cause);
+    }
+  };
+
+  const getPostAggregate = async (id: string): Promise<PostAggregate> => {
+    try {
+      const [postRows, revisions] = await db.batch([
+        db.select().from(posts).where(eq(posts.id, id)).limit(1),
+        db
+          .select()
+          .from(postRevisions)
+          .where(eq(postRevisions.postId, id))
+          .orderBy(asc(postRevisions.version)),
+      ]);
+      const post = postRows[0];
+      if (post === undefined) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post was not found");
+      }
+      return { post, revisions };
     } catch (error) {
+      if (error instanceof RepositoryError) {
+        throw error;
+      }
       throw new RepositoryError(
         RepositoryErrorCode.READ_FAILED,
         "Failed to read post revisions",
         error,
       );
     }
-    return { post, revisions };
+  };
+
+  const purgePost = async (id: string): Promise<void> => {
+    try {
+      const results = await database.batch([
+        database
+          .prepare("UPDATE posts SET active_published_revision_id = NULL WHERE id = ?")
+          .bind(id),
+        database.prepare("DELETE FROM publication_jobs WHERE post_id = ?").bind(id),
+        database.prepare("DELETE FROM posts WHERE id = ?").bind(id),
+      ]);
+      if (results[2]?.meta.changes === 0) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post was not found");
+      }
+    } catch (error) {
+      if (error instanceof RepositoryError) {
+        throw error;
+      }
+      throw new RepositoryError(RepositoryErrorCode.WRITE_FAILED, "Failed to purge post", error);
+    }
   };
 
   const createAuthorPostRevision = async (
@@ -142,51 +207,65 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
   ): Promise<CreatedAuthorPostRevision> => {
     const { author, post, revision } = input;
     try {
-      await database.batch([
-        database
-          .prepare(
-            "INSERT INTO authors (id, access_subject, display_name, email, avatar_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          )
-          .bind(
-            author.id,
-            author.accessSubject,
-            author.displayName,
-            author.email ?? null,
-            author.avatarUrl ?? null,
-            author.createdAt,
-            author.updatedAt,
-          ),
-        database
-          .prepare(
-            "INSERT INTO posts (id, slug, status, active_published_revision_id, scheduled_at, canonical_url, noindex, created_by, created_at, updated_at) VALUES (?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?)",
-          )
-          .bind(
-            post.id,
-            post.slug,
-            post.scheduledAt ?? null,
-            post.canonicalUrl ?? null,
-            post.noindex ?? 0,
-            author.id,
-            post.createdAt,
-            post.updatedAt,
-          ),
-        database
-          .prepare(
-            "INSERT INTO post_revisions (id, post_id, version, title, content_version, content_json, excerpt, metadata_json, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          )
-          .bind(
-            revision.id,
-            post.id,
-            revision.version,
-            revision.title,
-            revision.contentVersion,
-            revision.contentJson,
-            revision.excerpt ?? null,
-            revision.metadataJson ?? "{}",
-            author.id,
-            revision.createdAt,
-          ),
+      const [createdAuthors, createdPosts, createdRevisions] = await db.batch([
+        db
+          .insert(authors)
+          .values({
+            id: author.id,
+            accessSubject: author.accessSubject,
+            displayName: author.displayName,
+            email: author.email ?? null,
+            avatarUrl: author.avatarUrl ?? null,
+            createdAt: author.createdAt,
+            updatedAt: author.updatedAt,
+          })
+          .returning(),
+        db
+          .insert(posts)
+          .values({
+            id: post.id,
+            slug: post.slug,
+            status: "draft",
+            activePublishedRevisionId: null,
+            scheduledAt: post.scheduledAt ?? null,
+            canonicalUrl: post.canonicalUrl ?? null,
+            noindex: post.noindex ?? 0,
+            createdBy: author.id,
+            createdAt: post.createdAt,
+            updatedAt: post.updatedAt,
+          })
+          .returning(),
+        db
+          .insert(postRevisions)
+          .values({
+            id: revision.id,
+            postId: post.id,
+            version: revision.version,
+            title: revision.title,
+            contentVersion: revision.contentVersion,
+            contentJson: revision.contentJson,
+            excerpt: revision.excerpt ?? null,
+            metadataJson: revision.metadataJson ?? "{}",
+            authorId: author.id,
+            createdAt: revision.createdAt,
+          })
+          .returning(),
       ]);
+      const createdAuthor = createdAuthors[0];
+      const createdPost = createdPosts[0];
+      const createdRevision = createdRevisions[0];
+      if (
+        createdAuthor === undefined ||
+        createdPost === undefined ||
+        createdRevision === undefined
+      ) {
+        throw new Error("Create statements returned no rows");
+      }
+      return {
+        author: createdAuthor,
+        post: createdPost,
+        revision: createdRevision,
+      };
     } catch (cause) {
       throw new RepositoryError(
         RepositoryErrorCode.WRITE_FAILED,
@@ -194,12 +273,6 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
         cause,
       );
     }
-
-    return {
-      author: await getAuthor(author.id),
-      post: await getPost(post.id),
-      revision: await getRevision(revision.id),
-    };
   };
 
   return {
@@ -209,5 +282,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     getPostBySlug,
     getRevision,
     getPostAggregate,
+    purgePost,
+    searchChunks: searchChunksByQuery,
   };
 }

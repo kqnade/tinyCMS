@@ -53,6 +53,36 @@ describe("editorial D1 constraints", () => {
     ).rejects.toThrow();
   });
 
+  it("rejects UUIDv7 identifiers with non-canonical hyphen placement", async () => {
+    await expect(
+      env.TEST_DB.prepare(
+        "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      )
+        .bind(
+          "018f0e5d-6a25-7b01-8f4a-7d62a5d3e40-",
+          "subject-extra-hyphen",
+          "Ada",
+          1_700_000_000_000,
+          1_700_000_000_000,
+        )
+        .run(),
+    ).rejects.toThrow();
+
+    await expect(
+      env.TEST_DB.prepare(
+        "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      )
+        .bind(
+          "018f0e5d6a25-7b01-8f4a-7d62a5d3e4012",
+          "subject-missing-hyphen",
+          "Ada",
+          1_700_000_000_001,
+          1_700_000_000_001,
+        )
+        .run(),
+    ).rejects.toThrow();
+  });
+
   it("rejects invalid booleans, timestamps, and structured JSON", async () => {
     const checkAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3c201";
     const checkPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3c202";

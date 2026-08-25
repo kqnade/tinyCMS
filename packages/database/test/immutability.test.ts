@@ -37,4 +37,45 @@ describe("post revision immutability", () => {
       .first<{ title: string }>();
     expect(revision?.title).toBe("Original");
   });
+
+  it("allows revisions to be removed by deleting their post", async () => {
+    const cascadeAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d201";
+    const cascadePostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d202";
+    const cascadeRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d203";
+
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(cascadeAuthorId, "subject-cascade", "Ada", 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(cascadePostId, "cascade-post", cascadeAuthorId, 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO post_revisions (id, post_id, version, title, content_version, content_json, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        cascadeRevisionId,
+        cascadePostId,
+        1,
+        "Cascade",
+        1,
+        '{"type":"doc"}',
+        cascadeAuthorId,
+        1_700_000_000_000,
+      )
+      .run();
+
+    await expect(
+      env.TEST_DB.prepare("DELETE FROM posts WHERE id = ?").bind(cascadePostId).run(),
+    ).resolves.toMatchObject({ success: true });
+
+    await expect(
+      env.TEST_DB.prepare("SELECT id FROM post_revisions WHERE id = ?")
+        .bind(cascadeRevisionId)
+        .first(),
+    ).resolves.toBeNull();
+  });
 });

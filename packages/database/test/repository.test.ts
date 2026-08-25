@@ -198,4 +198,91 @@ describe("editorial repository", () => {
     });
     expect(second.revision.postId).not.toBe(first.revision.postId);
   });
+
+  it("purges a post and its dependent publication and search records", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const created = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e501",
+        accessSubject: "subject-repository-purge",
+        displayName: "Purge Author",
+        createdAt: 1_700_000_000_100,
+        updatedAt: 1_700_000_000_100,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e502",
+        slug: "repository-purge",
+        createdAt: 1_700_000_000_101,
+        updatedAt: 1_700_000_000_101,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e503",
+        version: 1,
+        title: "Purge me",
+        contentVersion: 1,
+        contentJson: '{"type":"doc"}',
+        createdAt: 1_700_000_000_102,
+      },
+    });
+    const jobId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e504";
+    const chunkId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e505";
+
+    await env.TEST_DB.prepare("UPDATE posts SET active_published_revision_id = ? WHERE id = ?")
+      .bind(created.revision.id, created.post.id)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO publication_jobs (id, idempotency_key, post_id, revision_id, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        jobId,
+        "repository-purge-job",
+        created.post.id,
+        created.revision.id,
+        "pending",
+        1_700_000_000_103,
+        1_700_000_000_103,
+      )
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO search_chunks (id, post_id, revision_id, chunk_index, title, heading, body, tags, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        chunkId,
+        created.post.id,
+        created.revision.id,
+        0,
+        "Purgeable",
+        "Cleanup",
+        "This content is removed with the post",
+        "cleanup",
+        1_700_000_000_104,
+      )
+      .run();
+
+    await expect(repository.purgePost(created.post.id)).resolves.toBeUndefined();
+
+    await expect(
+      env.TEST_DB.prepare("SELECT id FROM posts WHERE id = ?").bind(created.post.id).first(),
+    ).resolves.toBeNull();
+    await expect(
+      env.TEST_DB.prepare("SELECT id FROM post_revisions WHERE id = ?")
+        .bind(created.revision.id)
+        .first(),
+    ).resolves.toBeNull();
+    await expect(
+      env.TEST_DB.prepare("SELECT id FROM publication_jobs WHERE id = ?").bind(jobId).first(),
+    ).resolves.toBeNull();
+    await expect(
+      env.TEST_DB.prepare("SELECT id FROM search_chunks WHERE id = ?").bind(chunkId).first(),
+    ).resolves.toBeNull();
+    await expect(
+      env.TEST_DB.prepare("SELECT id FROM search_chunks_fts WHERE search_chunks_fts MATCH ?")
+        .bind("Purgeable")
+        .all(),
+    ).resolves.toMatchObject({ results: [] });
+
+    await expect(
+      repository.purgePost("018f0e5d-6a25-7b01-8f4a-7d62a5d3e506"),
+    ).rejects.toMatchObject({ code: RepositoryErrorCode.NOT_FOUND });
+  });
 });

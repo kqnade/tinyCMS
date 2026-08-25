@@ -13,6 +13,7 @@ import {
 
 const uuidv7Check = (column: SQLWrapper) => sql`
   length(${column}) = 36
+  AND length(replace(${column}, '-', '')) = 32
   AND ${column} = lower(${column})
   AND ${column} NOT GLOB '*[^0-9a-f-]*'
   AND substr(${column}, 9, 1) = '-'

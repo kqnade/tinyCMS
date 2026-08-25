@@ -1,6 +1,7 @@
 CREATE TABLE authors (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -21,6 +22,7 @@ CREATE TABLE authors (
 CREATE TABLE posts (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -44,6 +46,7 @@ CREATE TABLE posts (
     active_published_revision_id IS NULL
     OR (
       length(active_published_revision_id) = 36
+      AND length(replace(active_published_revision_id, '-', '')) = 32
       AND active_published_revision_id = lower(active_published_revision_id)
       AND active_published_revision_id NOT GLOB '*[^0-9a-f-]*'
       AND substr(active_published_revision_id, 9, 1) = '-'
@@ -70,6 +73,7 @@ CREATE TABLE posts (
 CREATE TABLE post_revisions (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -95,6 +99,7 @@ CREATE TABLE post_revisions (
 CREATE TABLE tags (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -125,6 +130,7 @@ CREATE TABLE post_tags (
 CREATE TABLE media (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -151,6 +157,7 @@ CREATE TABLE media (
 CREATE TABLE redirects (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -169,6 +176,7 @@ CREATE TABLE redirects (
 CREATE TABLE publication_jobs (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -201,6 +209,7 @@ CREATE TABLE publication_jobs (
 CREATE TABLE site_settings (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -219,6 +228,7 @@ CREATE TABLE site_settings (
 CREATE TABLE audit_events (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -235,6 +245,7 @@ CREATE TABLE audit_events (
     entity_id IS NULL
     OR (
       length(entity_id) = 36
+      AND length(replace(entity_id, '-', '')) = 32
       AND entity_id = lower(entity_id)
       AND entity_id NOT GLOB '*[^0-9a-f-]*'
       AND substr(entity_id, 9, 1) = '-'
@@ -252,6 +263,7 @@ CREATE TABLE audit_events (
 CREATE TABLE search_chunks (
   id TEXT PRIMARY KEY NOT NULL CHECK (
     length(id) = 36
+    AND length(replace(id, '-', '')) = 32
     AND id = lower(id)
     AND id NOT GLOB '*[^0-9a-f-]*'
     AND substr(id, 9, 1) = '-'
@@ -304,7 +316,8 @@ CREATE VIRTUAL TABLE search_chunks_fts USING fts5(
   body,
   tags,
   content='search_chunks',
-  content_rowid='rowid'
+  content_rowid='rowid',
+  tokenize='trigram'
 );
 
 CREATE TRIGGER posts_active_revision_same_post
@@ -337,6 +350,7 @@ END;
 
 CREATE TRIGGER post_revisions_no_delete
 BEFORE DELETE ON post_revisions
+WHEN EXISTS (SELECT 1 FROM posts WHERE id = OLD.post_id)
 BEGIN
   SELECT RAISE(ABORT, 'post revisions are immutable');
 END;
