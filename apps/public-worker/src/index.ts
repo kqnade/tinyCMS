@@ -1,5 +1,5 @@
 import { errorResponse, successResponse } from "@tinycms/contracts";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 
 type PublicWorker = {
   Variables: {
@@ -7,30 +7,73 @@ type PublicWorker = {
   };
 };
 
-const app = new Hono<PublicWorker>();
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), geolocation=(), microphone=()",
+  "Content-Security-Policy":
+    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'",
+  "X-Frame-Options": "DENY",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+} as const;
 
-app.use("*", async (context, next) => {
-  const requestId = crypto.randomUUID();
-  context.set("requestId", requestId);
+type RouteRegistrar = (app: Hono<PublicWorker>) => void;
 
-  await next();
+function internalErrorResponse(error: unknown, context: Context<PublicWorker>) {
+  const requestId = context.get("requestId");
+  console.error("Unhandled request error", {
+    requestId,
+    errorCategory: error instanceof Error ? "Error" : "Unknown",
+  });
+  context.header("Cache-Control", "no-store");
+  return context.json(errorResponse("INTERNAL_ERROR", "Internal server error", requestId), 500);
+}
 
-  context.header("X-Request-Id", requestId);
-});
+export function createPublicApp(registerRoutes?: RouteRegistrar) {
+  const app = new Hono<PublicWorker>();
 
-app.get("/healthz", (context) => {
-  return context.json(successResponse({ status: "ok" }, context.get("requestId")));
-});
+  app.use("*", async (context, next) => {
+    const requestId = crypto.randomUUID();
+    context.set("requestId", requestId);
 
-app.notFound((context) => {
-  return context.json(errorResponse("NOT_FOUND", "Not found", context.get("requestId")), 404);
-});
+    try {
+      await next();
+    } catch (error) {
+      context.res = internalErrorResponse(error, context);
+    }
 
-app.onError((_, context) => {
-  return context.json(
-    errorResponse("INTERNAL_ERROR", "Internal server error", context.get("requestId")),
-    500,
-  );
-});
+    const routeResponse = context.res;
+    context.res = new Response(routeResponse.body, routeResponse);
+    const responseHeaders = context.res.headers;
+
+    if (context.res.status >= 400) {
+      responseHeaders.set("Cache-Control", "no-store");
+    }
+    responseHeaders.set("X-Request-Id", requestId);
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      if (!responseHeaders.has(name)) {
+        responseHeaders.set(name, value);
+      }
+    }
+  });
+
+  app.get("/healthz", (context) => {
+    context.header("Cache-Control", "no-store");
+    return context.json(successResponse({ status: "ok" }, context.get("requestId")));
+  });
+
+  registerRoutes?.(app);
+
+  app.notFound((context) => {
+    context.header("Cache-Control", "no-store");
+    return context.json(errorResponse("NOT_FOUND", "Not found", context.get("requestId")), 404);
+  });
+
+  app.onError(internalErrorResponse);
+
+  return app;
+}
+
+const app = createPublicApp();
 
 export default app;
