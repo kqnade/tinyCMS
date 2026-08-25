@@ -12,6 +12,8 @@ Include the affected component, impact, reproduction conditions, and any suggest
 
 ## Current deployment boundary
 
-The repository is a development foundation, not a production-ready CMS. The Admin Worker currently enforces an exact request-host check, but Cloudflare Access JWT verification and author authorization are not implemented. Do not expose it as a production authoring API.
+The repository is a development foundation, not a production-ready CMS. The Admin Worker checks the exact request host before authentication network work, requires `Cf-Access-Jwt-Assertion`, and verifies the RS256 signature, issuer, application audience, expiry, and not-before claims against the Cloudflare Access JWKS. Authorization beyond membership in the configured Access application audience is not implemented. Do not expose it as a production authoring API.
+
+`ACCESS_TEAM_DOMAIN` must be a bare Cloudflare Access subdomain ending in `.cloudflareaccess.com`, without a scheme, path, or port. `ACCESS_AUD` must be the exact application audience tag contained in the verified token's `aud` claim. Missing or invalid configuration fails closed.
 
 The tracked Wrangler configuration contains local defaults only. Production deployment requires separate Access policies, restricted routes, secrets, response security headers, abuse controls, and environment-specific bindings described in the [design snapshot](.dev/designdoc/tinycms.md).

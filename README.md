@@ -10,14 +10,14 @@ The repository currently provides a runnable development foundation:
 - tests running in Cloudflare's local `workerd` runtime;
 - strict TypeScript, Biome, pinned mise tools, Renovate, and least-privilege CI.
 
-It is not yet a usable CMS. Storage bindings, editorial workflows, Access JWT verification, publishing, search, likes, and AI assistance remain to be implemented. The planned scope and security model are recorded in the [design snapshot](.dev/designdoc/tinycms.md).
+It is not yet a usable CMS. Storage bindings, editorial workflows, publishing, search, likes, and AI assistance remain to be implemented. The planned scope and security model are recorded in the [design snapshot](.dev/designdoc/tinycms.md).
 
 ## Applications
 
 | Application | Local URL | Current behavior |
 | --- | --- | --- |
 | Public Worker | `http://127.0.0.1:8787` | Hono health endpoint and public-only routing boundary |
-| Admin Worker | `http://127.0.0.1:8788` | Hono health endpoint restricted to the configured host |
+| Admin Worker | `http://127.0.0.1:8788` | Hono health endpoint protected by host fencing and Access JWT verification |
 | Studio | `http://127.0.0.1:5173` | React application shell with light and dark themes |
 
 ## Development
@@ -31,12 +31,14 @@ mise run install
 mise run dev
 ```
 
-The development servers bind only to `127.0.0.1`. Verify the Worker endpoints with:
+The development servers bind only to `127.0.0.1`. Check the Worker boundaries with:
 
 ```sh
 curl http://127.0.0.1:8787/healthz
-curl -H 'Host: localhost' http://127.0.0.1:8788/healthz
+curl -i -H 'Host: localhost' http://127.0.0.1:8788/healthz
 ```
+
+The public request returns the health response. The Admin Worker fails closed with the tracked local defaults, so the admin request returns `401` with `AUTH_REQUIRED` until it receives a valid `Cf-Access-Jwt-Assertion` header and valid Access configuration.
 
 Run the complete local quality gate with:
 
@@ -53,6 +55,13 @@ The tracked `wrangler.jsonc` files contain development-safe defaults and no Clou
 ```sh
 mise exec -- wrangler types --include-runtime false
 ```
+
+The Admin Worker requires these non-secret variables:
+
+- `ACCESS_TEAM_DOMAIN`: the bare Cloudflare Access hostname, such as `team.cloudflareaccess.com`, without a scheme, path, or port;
+- `ACCESS_AUD`: the exact application audience tag, which must be present in the verified token's `aud` claim.
+
+Both values are empty in the tracked local configuration. An assertion presented while either value is empty is rejected with `AUTH_INVALID`.
 
 Dotenv files and `.dev.vars` files are ignored. Commit an example file only when the application consumes the corresponding value, and include placeholders rather than credentials. Production identifiers, account-specific routes, and secrets must not be added to the public template.
 

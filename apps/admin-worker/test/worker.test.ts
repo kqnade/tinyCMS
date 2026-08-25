@@ -8,6 +8,11 @@ const ACCESS_DOMAIN = "team.cloudflareaccess.com";
 const ACCESS_ISSUER = `https://${ACCESS_DOMAIN}`;
 const ACCESS_AUDIENCE = "test-access-audience";
 const NOW = 1_700_000_000_000;
+const ACCESS_BINDINGS = {
+  ADMIN_HOST: "localhost",
+  ACCESS_TEAM_DOMAIN: ACCESS_DOMAIN,
+  ACCESS_AUD: ACCESS_AUDIENCE,
+};
 
 async function createSigningKey(kid: string) {
   const keyPair = (await crypto.subtle.generateKey(
@@ -51,6 +56,24 @@ async function expectAuthInvalid(response: Response) {
   });
 }
 
+async function requestRejectedBeforeJwks(assertion: string) {
+  let jwksFetchCount = 0;
+  const application = createAdminApp({
+    now: () => NOW,
+    fetch: async () => {
+      jwksFetchCount += 1;
+      return new Response(JSON.stringify({ keys: [] }), { status: 200 });
+    },
+  });
+  const response = await application.request(
+    "https://localhost/healthz",
+    { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+    ACCESS_BINDINGS,
+  );
+
+  return { jwksFetchCount, response };
+}
+
 describe("admin worker", () => {
   it("requires an Access assertion on the configured host", async () => {
     const response = await exports.default.fetch("https://localhost/healthz");
@@ -67,35 +90,17 @@ describe("admin worker", () => {
   });
 
   it("rejects a malformed Access assertion", async () => {
-    const response = await exports.default.fetch("https://localhost/healthz", {
-      headers: { "Cf-Access-Jwt-Assertion": "not-a-jwt" },
-    });
-    const requestId = response.headers.get("X-Request-Id");
+    const { jwksFetchCount, response } = await requestRejectedBeforeJwks("not-a-jwt");
 
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "AUTH_INVALID",
-        message: "Invalid authentication",
-        requestId,
-      },
-    });
+    await expectAuthInvalid(response);
+    expect(jwksFetchCount).toBe(0);
   });
 
   it("rejects an assertion with invalid JWT parts", async () => {
-    const response = await exports.default.fetch("https://localhost/healthz", {
-      headers: { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" },
-    });
-    const requestId = response.headers.get("X-Request-Id");
+    const { jwksFetchCount, response } = await requestRejectedBeforeJwks("aaa.bbb.ccc");
 
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "AUTH_INVALID",
-        message: "Invalid authentication",
-        requestId,
-      },
-    });
+    await expectAuthInvalid(response);
+    expect(jwksFetchCount).toBe(0);
   });
 
   it("rejects an assertion that is not RS256", async () => {
@@ -104,19 +109,10 @@ describe("admin worker", () => {
       "test-secret",
       "HS256",
     );
-    const response = await exports.default.fetch("https://localhost/healthz", {
-      headers: { "Cf-Access-Jwt-Assertion": assertion },
-    });
-    const requestId = response.headers.get("X-Request-Id");
+    const { jwksFetchCount, response } = await requestRejectedBeforeJwks(assertion);
 
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "AUTH_INVALID",
-        message: "Invalid authentication",
-        requestId,
-      },
-    });
+    await expectAuthInvalid(response);
+    expect(jwksFetchCount).toBe(0);
   });
 
   it("rejects an assertion when Access variables are not configured", async () => {
