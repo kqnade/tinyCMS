@@ -220,6 +220,166 @@ describe("editorial repository", () => {
     expect(aggregate.revisions[0]).toEqual(initial.revision);
   });
 
+  it("restores only same-post revisions as new immutable snapshots", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const target = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea01",
+        accessSubject: "subject-repository-restore-target",
+        displayName: "Restore Target Author",
+        createdAt: 1_700_000_001_000,
+        updatedAt: 1_700_000_001_000,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea02",
+        slug: "repository-restore-target",
+        createdAt: 1_700_000_001_001,
+        updatedAt: 1_700_000_001_001,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea03",
+        version: 1,
+        title: "Original snapshot",
+        contentVersion: 3,
+        contentJson: '{"type":"doc","children":[{"text":"original"}]}',
+        excerpt: "Original excerpt",
+        metadataJson: '{"template":"article","stage":"original"}',
+        createdAt: 1_700_000_001_002,
+      },
+    });
+    const restoreAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea04";
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        restoreAuthorId,
+        "subject-repository-restore-author",
+        "Restore Author",
+        1_700_000_001_003,
+        1_700_000_001_003,
+      )
+      .run();
+
+    const second = await repository.appendRevision({
+      postId: target.post.id,
+      authorId: target.author.id,
+      expectedVersion: 1,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea05",
+        title: "Changed snapshot",
+        contentVersion: 8,
+        contentJson: '{"type":"doc","children":[{"text":"changed"}]}',
+        excerpt: "Changed excerpt",
+        metadataJson: '{"template":"article","stage":"changed"}',
+        createdAt: 1_700_000_001_004,
+      },
+    });
+    const restored = await repository.restoreRevision({
+      postId: target.post.id,
+      sourceRevisionId: target.revision.id,
+      expectedVersion: 2,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea06",
+      authorId: restoreAuthorId,
+      createdAt: 1_700_000_001_005,
+    });
+
+    expect(restored).toEqual({
+      id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea06",
+      postId: target.post.id,
+      version: 3,
+      title: target.revision.title,
+      contentVersion: target.revision.contentVersion,
+      contentJson: target.revision.contentJson,
+      excerpt: target.revision.excerpt,
+      metadataJson: target.revision.metadataJson,
+      authorId: restoreAuthorId,
+      createdAt: 1_700_000_001_005,
+    });
+    const restoredTarget = await repository.getPostAggregate(target.post.id);
+    expect(restoredTarget.revisions.map((revision) => revision.version)).toEqual([1, 2, 3]);
+    expect(restoredTarget.revisions).toEqual([target.revision, second, restored]);
+
+    const foreign = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea07",
+        accessSubject: "subject-repository-restore-foreign",
+        displayName: "Foreign Author",
+        createdAt: 1_700_000_001_006,
+        updatedAt: 1_700_000_001_006,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea08",
+        slug: "repository-restore-foreign",
+        createdAt: 1_700_000_001_007,
+        updatedAt: 1_700_000_001_007,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea09",
+        version: 1,
+        title: "Foreign snapshot",
+        contentVersion: 5,
+        contentJson: '{"type":"doc","children":[{"text":"foreign"}]}',
+        excerpt: "Foreign excerpt",
+        metadataJson: '{"template":"foreign"}',
+        createdAt: 1_700_000_001_008,
+      },
+    });
+    const targetBeforeRejectedRestore = await repository.getPostAggregate(target.post.id);
+    const foreignBeforeRejectedRestore = await repository.getPostAggregate(foreign.post.id);
+    const rejectedRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea0a";
+    const absentSourceRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea0b";
+
+    let absentError: unknown;
+    try {
+      await repository.restoreRevision({
+        postId: target.post.id,
+        sourceRevisionId: absentSourceRevisionId,
+        expectedVersion: 3,
+        revisionId: rejectedRevisionId,
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_001_009,
+      });
+    } catch (cause) {
+      absentError = cause;
+    }
+    expect(absentError).toBeInstanceOf(RepositoryError);
+    const absentRepositoryError = absentError as RepositoryError;
+    expect(absentRepositoryError).toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+
+    let crossPostError: unknown;
+    try {
+      await repository.restoreRevision({
+        postId: target.post.id,
+        sourceRevisionId: foreign.revision.id,
+        expectedVersion: 3,
+        revisionId: rejectedRevisionId,
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_001_010,
+      });
+    } catch (cause) {
+      crossPostError = cause;
+    }
+    expect(crossPostError).toBeInstanceOf(RepositoryError);
+    const crossPostRepositoryError = crossPostError as RepositoryError;
+    expect(crossPostRepositoryError).toMatchObject({
+      code: absentRepositoryError.code,
+      message: absentRepositoryError.message,
+    });
+    expect(crossPostRepositoryError.message).toBe(absentRepositoryError.message);
+
+    await expect(repository.getPostAggregate(target.post.id)).resolves.toEqual(
+      targetBeforeRejectedRestore,
+    );
+    await expect(repository.getPostAggregate(foreign.post.id)).resolves.toEqual(
+      foreignBeforeRejectedRestore,
+    );
+    await expect(repository.getRevision(rejectedRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
+
   it("rejects stale revision appends", async () => {
     const repository = createEditorialRepository(env.TEST_DB);
     const initial = await repository.createAuthorPostRevision({
