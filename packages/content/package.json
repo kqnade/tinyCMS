@@ -1,0 +1,17 @@
+{
+  "name": "@tinycms/content",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/commonmark": "0.27.10",
+    "commonmark": "0.31.2"
+  }
+}
