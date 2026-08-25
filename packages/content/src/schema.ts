@@ -992,6 +992,14 @@ function parseText(
     if (marks === undefined && Object.hasOwn(input, "marks")) {
       return undefined;
     }
+    if (marks?.some((mark) => mark.type === "code") && /[\r\n]/u.test(input.text)) {
+      context.add(
+        [...path, "text"],
+        "code_newline",
+        "Code-marked text cannot contain carriage returns or line feeds",
+      );
+      return undefined;
+    }
     return {
       type: "text",
       text: input.text.replaceAll("\r\n", "\n"),

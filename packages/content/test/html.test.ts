@@ -17,7 +17,7 @@ describe("HTML renderer", () => {
 
   it("renders every canonical v1 block, nested block, and inline mark in fixed order", () => {
     const expected = [
-      '<p><strong><em><s><code><a href="https://example.com/article" rel="noopener noreferrer">HTML-looking data: &lt;script&gt;alert(1)&lt;/script&gt;\nnext</a></code></s></em></strong> plain</p>',
+      '<p><strong><em><s><code><a href="https://example.com/article" rel="noopener noreferrer">HTML-looking data: &lt;script&gt;alert(1)&lt;/script&gt;</a></code></s></em></strong>\nnext plain</p>',
       "<h2>Heading</h2>",
       '<ul><li><p>Bullet</p>\n<p>Continuation</p>\n<ol start="3"><li><p>Nested</p></li></ol>\n<blockquote><p>Quoted</p></blockquote>\n<pre><code class="language-typescript">const value = 1;\n</code></pre></li></ul>',
       "<blockquote><p>A quote</p>\n<h3>A quoted heading</h3>\n<pre><code>plain code</code></pre>\n<hr></blockquote>",

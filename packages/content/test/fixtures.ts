@@ -6,7 +6,7 @@ export const validContentDocument = {
       content: [
         {
           type: "text",
-          text: "HTML-looking data: <script>alert(1)</script>\r\nnext",
+          text: "HTML-looking data: <script>alert(1)</script>",
           marks: [
             { type: "link", attrs: { href: "https://example.com/article" } },
             { type: "code" },
@@ -15,7 +15,7 @@ export const validContentDocument = {
             { type: "bold" },
           ],
         },
-        { type: "text", text: " plain" },
+        { type: "text", text: "\r\nnext plain" },
       ],
     },
     {
@@ -113,7 +113,7 @@ export const canonicalContentDocument = {
       content: [
         {
           type: "text",
-          text: "HTML-looking data: <script>alert(1)</script>\nnext",
+          text: "HTML-looking data: <script>alert(1)</script>",
           marks: [
             { type: "bold" },
             { type: "italic" },
@@ -122,7 +122,7 @@ export const canonicalContentDocument = {
             { type: "link", attrs: { href: "https://example.com/article" } },
           ],
         },
-        { type: "text", text: " plain" },
+        { type: "text", text: "\nnext plain" },
       ],
     },
     {

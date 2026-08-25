@@ -79,6 +79,28 @@ describe("content document schema", () => {
     });
   });
 
+  it("rejects line breaks in code-marked text with a stable issue", () => {
+    const result = validateContentDocument(CONTENT_VERSION, {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "before\r\nafter", marks: [{ type: "code" }] }],
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues).toEqual([
+      {
+        code: "code_newline",
+        message: "Code-marked text cannot contain carriage returns or line feeds",
+        path: ["content", 0, "content", 0, "text"],
+      },
+    ]);
+  });
+
   it("throws its structured validation error from parse", () => {
     expect(() => parseContentDocument(CONTENT_VERSION, { type: "html" })).toThrow(
       ContentValidationError,

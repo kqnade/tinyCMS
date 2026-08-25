@@ -177,7 +177,15 @@ function renderInline(content: readonly ContentTextNode[] | undefined): string {
 function renderText(node: ContentTextNode): string {
   const marks = node.marks ?? [];
   const codeMark = marks.find((mark) => mark.type === "code");
-  let result = codeMark === undefined ? escapeMarkdownText(node.text) : renderCodeSpan(node.text);
+  const value =
+    codeMark === undefined
+      ? splitBoundaryWhitespace(node.text)
+      : { leading: "", content: node.text, trailing: "" };
+  if (codeMark === undefined && value.content.length === 0) {
+    return value.leading;
+  }
+  let result =
+    codeMark === undefined ? escapeMarkdownText(value.content) : renderCodeSpan(value.content);
 
   const linkMark = marks.find((mark) => mark.type === "link");
   if (linkMark?.type === "link") {
@@ -194,14 +202,31 @@ function renderText(node: ContentTextNode): string {
         result = `**${result}**`;
         break;
       case "italic":
-        result = `_${result}_`;
+        result = `*${result}*`;
         break;
       case "strike":
         result = `~~${result}~~`;
         break;
     }
   }
-  return result;
+  return `${value.leading}${result}${value.trailing}`;
+}
+
+function splitBoundaryWhitespace(value: string): {
+  readonly leading: string;
+  readonly content: string;
+  readonly trailing: string;
+} {
+  const leading = value.match(/^\s+/u)?.[0] ?? "";
+  const trailing = value.match(/\s+$/u)?.[0] ?? "";
+  if (leading.length + trailing.length >= value.length) {
+    return { leading: value, content: "", trailing: "" };
+  }
+  return {
+    leading,
+    content: value.slice(leading.length, value.length - trailing.length),
+    trailing,
+  };
 }
 
 function renderCodeSpan(value: string): string {

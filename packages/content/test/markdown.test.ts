@@ -1,6 +1,14 @@
+import { HtmlRenderer, Parser } from "commonmark";
 import { describe, expect, it } from "vitest";
 import { CONTENT_VERSION, ContentValidationError, renderMarkdown } from "../src/index";
 import { canonicalContentDocument } from "./fixtures";
+
+const commonmarkParser = new Parser();
+const commonmarkHtmlRenderer = new HtmlRenderer();
+
+function renderCommonmarkHtml(markdown: string): string {
+  return commonmarkHtmlRenderer.render(commonmarkParser.parse(markdown));
+}
 
 describe("Markdown renderer", () => {
   it("renders an empty document as an empty fragment", () => {
@@ -15,7 +23,7 @@ describe("Markdown renderer", () => {
 
   it("renders every canonical v1 block, nested block, and inline mark", () => {
     const expected = [
-      "**_~~[`HTML-looking data: <script>alert(1)</script>\nnext`](https://example.com/article)~~_** plain",
+      "***~~[`HTML-looking data: <script>alert(1)</script>`](https://example.com/article)~~***\nnext plain",
       "## Heading",
       [
         "- Bullet",
@@ -55,6 +63,124 @@ describe("Markdown renderer", () => {
         resolveMediaUrl: (mediaId) => `/media/${mediaId}/original`,
       }),
     ).toBe(expected);
+  });
+
+  it("preserves italic formatting between adjacent text nodes in CommonMark", () => {
+    const output = renderMarkdown(
+      CONTENT_VERSION,
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "before" },
+              { type: "text", text: "middle", marks: [{ type: "italic" }] },
+              { type: "text", text: "after" },
+            ],
+          },
+        ],
+      },
+      { resolveMediaUrl: () => null },
+    );
+
+    expect(output).toBe("before*middle*after");
+    expect(renderCommonmarkHtml(output)).toBe("<p>before<em>middle</em>after</p>\n");
+  });
+
+  it("keeps leading and trailing whitespace outside italic delimiters", () => {
+    const output = renderMarkdown(
+      CONTENT_VERSION,
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "\u2003marked\u00a0", marks: [{ type: "italic" }] }],
+          },
+        ],
+      },
+      { resolveMediaUrl: () => null },
+    );
+
+    expect(output).toBe("\u2003*marked*\u00a0");
+    expect(renderCommonmarkHtml(output)).toBe("<p><em>marked</em></p>\n");
+  });
+
+  it("keeps leading and trailing whitespace outside strong delimiters", () => {
+    const output = renderMarkdown(
+      CONTENT_VERSION,
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: " marked ", marks: [{ type: "bold" }] }],
+          },
+        ],
+      },
+      { resolveMediaUrl: () => null },
+    );
+
+    expect(output).toBe(" **marked** ");
+    expect(renderCommonmarkHtml(output)).toBe("<p><strong>marked</strong></p>\n");
+  });
+
+  it("does not emit delimiters for all-whitespace marked text", () => {
+    const output = renderMarkdown(
+      CONTENT_VERSION,
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "before" },
+              {
+                type: "text",
+                text: "   ",
+                marks: [
+                  { type: "bold" },
+                  { type: "italic" },
+                  { type: "strike" },
+                  { type: "link", attrs: { href: "https://example.com" } },
+                ],
+              },
+              { type: "text", text: "after" },
+            ],
+          },
+        ],
+      },
+      { resolveMediaUrl: () => null },
+    );
+
+    expect(output).toBe("before   after");
+    expect(renderCommonmarkHtml(output)).toBe("<p>before   after</p>\n");
+  });
+
+  it("preserves combined bold and italic formatting in CommonMark", () => {
+    const output = renderMarkdown(
+      CONTENT_VERSION,
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "both",
+                marks: [{ type: "italic" }, { type: "bold" }],
+              },
+            ],
+          },
+        ],
+      },
+      { resolveMediaUrl: () => null },
+    );
+
+    expect(output).toBe("***both***");
+    expect(renderCommonmarkHtml(output)).toBe("<p><em><strong>both</strong></em></p>\n");
   });
 
   it("escapes Markdown text and link, image, and bookmark fields", () => {
