@@ -2,7 +2,9 @@ export const CONTENT_VERSION = 1 as const;
 
 const MAX_DEPTH = 64;
 const MAX_NODES = 1_000;
+const MAX_ISSUES = 64;
 const MAX_TEXT_LENGTH = 1_000_000;
+const MAX_TOTAL_TEXT_LENGTH = 1_000_000;
 
 const CODE_LANGUAGES = new Set([
   "bash",
@@ -192,20 +194,54 @@ class ValidationContext {
   readonly issues: ContentValidationIssue[] = [];
   readonly activeNodes = new WeakSet<object>();
   nodeCount = 0;
+  totalTextLength = 0;
+  stopped = false;
 
   add(path: Path, code: string, message: string): void {
+    if (this.stopped || this.issues.length >= MAX_ISSUES) {
+      return;
+    }
     this.issues.push({ code, message, path: [...path] });
+    if (this.issues.length >= MAX_ISSUES) {
+      this.stopped = true;
+    }
   }
 
-  enterNode(value: object, path: Path, depth: number): boolean {
-    if (depth > MAX_DEPTH) {
-      this.add(path, "max_depth", "Document nesting is too deep");
+  stop(path: Path, code: string, message: string): void {
+    if (this.stopped) {
+      return;
+    }
+    this.add(path, code, message);
+    this.stopped = true;
+  }
+
+  addTextLength(length: number, path: Path): boolean {
+    if (this.stopped) {
+      return false;
+    }
+    if (this.totalTextLength + length > MAX_TOTAL_TEXT_LENGTH) {
+      this.stop(path, "max_total_text_length", "Total text content is too long");
+      return false;
+    }
+    this.totalTextLength += length;
+    return true;
+  }
+
+  enterNode(value: unknown, path: Path, depth: number): boolean {
+    if (this.stopped) {
       return false;
     }
     this.nodeCount += 1;
     if (this.nodeCount > MAX_NODES) {
-      this.add(path, "max_nodes", "Document contains too many nodes");
+      this.stop(path, "max_nodes", "Document contains too many nodes");
       return false;
+    }
+    if (depth > MAX_DEPTH) {
+      this.stop(path, "max_depth", "Document nesting is too deep");
+      return false;
+    }
+    if (!isRecord(value)) {
+      return true;
     }
     if (this.activeNodes.has(value)) {
       this.add(path, "cycle", "Document contains a cyclic node");
@@ -215,8 +251,10 @@ class ValidationContext {
     return true;
   }
 
-  leaveNode(value: object): void {
-    this.activeNodes.delete(value);
+  leaveNode(value: unknown): void {
+    if (isRecord(value)) {
+      this.activeNodes.delete(value);
+    }
   }
 }
 
@@ -271,7 +309,7 @@ function parseDocument(input: unknown, context: ValidationContext): ContentDocum
   }
 
   const content: ContentBlock[] = [];
-  for (let index = 0; index < input.content.length; index += 1) {
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
     const node = parseBlock(input.content[index], ["content", index], context, 1);
     if (node !== undefined) {
       content.push(node);
@@ -286,11 +324,11 @@ function parseBlock(
   context: ValidationContext,
   depth: number,
 ): ContentBlock | undefined {
-  if (!isRecord(input)) {
-    context.add(path, "invalid_node", "Node must be an object");
+  if (!context.enterNode(input, path, depth)) {
     return undefined;
   }
-  if (!context.enterNode(input, path, depth)) {
+  if (!isRecord(input)) {
+    context.add(path, "invalid_node", "Node must be an object");
     return undefined;
   }
   let result: ContentBlock | undefined;
@@ -345,11 +383,11 @@ function parseOrdinaryBlock(
   context: ValidationContext,
   depth: number,
 ): ContentOrdinaryBlock | undefined {
-  if (!isRecord(input)) {
-    context.add(path, "invalid_node", "Node must be an object");
+  if (!context.enterNode(input, path, depth)) {
     return undefined;
   }
-  if (!context.enterNode(input, path, depth)) {
+  if (!isRecord(input)) {
+    context.add(path, "invalid_node", "Node must be an object");
     return undefined;
   }
   try {
@@ -392,11 +430,11 @@ function parseListItemChild(
   context: ValidationContext,
   depth: number,
 ): ContentListItemChild | undefined {
-  if (!isRecord(input)) {
-    context.add(path, "invalid_node", "Node must be an object");
+  if (!context.enterNode(input, path, depth)) {
     return undefined;
   }
-  if (!context.enterNode(input, path, depth)) {
+  if (!isRecord(input)) {
+    context.add(path, "invalid_node", "Node must be an object");
     return undefined;
   }
   try {
@@ -434,7 +472,7 @@ function parseParagraph(
   }
   const content: ContentTextNode[] = [];
   if (Array.isArray(input.content)) {
-    for (let index = 0; index < input.content.length; index += 1) {
+    for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
       const text = parseText(
         input.content[index],
         [...path, "content", index],
@@ -526,7 +564,7 @@ function parseList(
     return undefined;
   }
   const content: ContentListItemNode[] = [];
-  for (let index = 0; index < input.content.length; index += 1) {
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
     const item = parseListItem(
       input.content[index],
       [...path, "content", index],
@@ -550,11 +588,11 @@ function parseListItem(
   context: ValidationContext,
   depth: number,
 ): ContentListItemNode | undefined {
-  if (!isRecord(input)) {
-    context.add(path, "invalid_node", "List item must be an object");
+  if (!context.enterNode(input, path, depth)) {
     return undefined;
   }
-  if (!context.enterNode(input, path, depth)) {
+  if (!isRecord(input)) {
+    context.add(path, "invalid_node", "List item must be an object");
     return undefined;
   }
   if (!hasExactKeys(input, ["type", "content"], path, context)) {
@@ -572,7 +610,7 @@ function parseListItem(
     return undefined;
   }
   const content: ContentListItemChild[] = [];
-  for (let index = 0; index < input.content.length; index += 1) {
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
     const childPath = [...path, "content", index];
     const child = parseListItemChild(input.content[index], childPath, context, depth + 1);
     if (child !== undefined) {
@@ -607,7 +645,7 @@ function parseBlockquote(
     return undefined;
   }
   const content: ContentOrdinaryBlock[] = [];
-  for (let index = 0; index < input.content.length; index += 1) {
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
     const block = parseOrdinaryBlock(
       input.content[index],
       [...path, "content", index],
@@ -651,7 +689,7 @@ function parseCodeBlock(
   }
   const content: ContentTextNode[] = [];
   if (Array.isArray(input.content)) {
-    for (let index = 0; index < input.content.length; index += 1) {
+    for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
       const text = parseText(
         input.content[index],
         [...path, "content", index],
@@ -888,18 +926,19 @@ function parseCallout(
     return undefined;
   }
   const content: ContentParagraphNode[] = [];
-  for (let index = 0; index < input.content.length; index += 1) {
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
     const paragraphPath = [...path, "content", index];
     const paragraph = input.content[index];
+    if (!context.enterNode(paragraph, paragraphPath, depth + 1)) {
+      continue;
+    }
     if (!isRecord(paragraph) || paragraph.type !== "paragraph") {
       context.add(
         [...paragraphPath, "type"],
         "invalid_nesting",
         "Callout content must contain paragraphs",
       );
-      continue;
-    }
-    if (!context.enterNode(paragraph, paragraphPath, depth + 1)) {
+      context.leaveNode(paragraph);
       continue;
     }
     const parsed = parseParagraph(paragraph, paragraphPath, context, depth + 1);
@@ -939,7 +978,7 @@ function parseInlineContent(
     return undefined;
   }
   const content: ContentTextNode[] = [];
-  for (let index = 0; index < input.content.length; index += 1) {
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
     const text = parseText(
       input.content[index],
       [...path, "content", index],
@@ -961,11 +1000,11 @@ function parseText(
   _depth: number,
   allowMarks: boolean,
 ): ContentTextNode | undefined {
-  if (!isRecord(input)) {
-    context.add(path, "invalid_text", "Inline content must be a text node");
+  if (!context.enterNode(input, path, _depth)) {
     return undefined;
   }
-  if (!context.enterNode(input, path, _depth)) {
+  if (!isRecord(input)) {
+    context.add(path, "invalid_text", "Inline content must be a text node");
     return undefined;
   }
   try {
@@ -981,7 +1020,7 @@ function parseText(
       return undefined;
     }
     if (input.text.length > MAX_TEXT_LENGTH) {
-      context.add([...path, "text"], "max_text_length", "Text content is too long");
+      context.stop([...path, "text"], "max_text_length", "Text content is too long");
       return undefined;
     }
     if (!allowMarks && Object.hasOwn(input, "marks")) {
@@ -1000,9 +1039,13 @@ function parseText(
       );
       return undefined;
     }
+    const text = input.text.replaceAll("\r\n", "\n");
+    if (!context.addTextLength(text.length, [...path, "text"])) {
+      return undefined;
+    }
     return {
       type: "text",
-      text: input.text.replaceAll("\r\n", "\n"),
+      text,
       ...(marks !== undefined && marks.length > 0 ? { marks } : {}),
     };
   } finally {
@@ -1029,7 +1072,7 @@ function parseMarks(
   }
   const marks: ContentTextMark[] = [];
   const seen = new Set<string>();
-  for (let index = 0; index < input.length; index += 1) {
+  for (let index = 0; index < input.length && !context.stopped; index += 1) {
     const markPath = [...path, index];
     const mark = input[index];
     if (!isRecord(mark) || typeof mark.type !== "string") {
@@ -1101,13 +1144,19 @@ function hasExactKeys(
 ): boolean {
   const allowed = new Set([...required, ...optional]);
   let valid = true;
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) {
+  for (const key in value) {
+    if (context.stopped) {
+      break;
+    }
+    if (Object.hasOwn(value, key) && !allowed.has(key)) {
       context.add([...path, key], "unknown_key", "Unknown property is not allowed");
       valid = false;
     }
   }
   for (const key of required) {
+    if (context.stopped) {
+      break;
+    }
     if (!Object.hasOwn(value, key)) {
       context.add([...path, key], "missing_key", "Required property is missing");
       valid = false;

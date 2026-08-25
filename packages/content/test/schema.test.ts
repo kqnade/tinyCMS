@@ -79,6 +79,87 @@ describe("content document schema", () => {
     });
   });
 
+  it("stops after the node budget with one terminal issue", () => {
+    const result = validateContentDocument(CONTENT_VERSION, {
+      type: "doc",
+      content: Array.from({ length: 5_000 }, () => ({ type: "paragraph" })),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues).toHaveLength(1);
+    expect(result.error.issues[0]).toEqual({
+      code: "max_nodes",
+      message: "Document contains too many nodes",
+      path: ["content", 1_000],
+    });
+  });
+
+  it("counts malformed child entries toward the node budget", () => {
+    const result = validateContentDocument(CONTENT_VERSION, {
+      type: "doc",
+      content: [null, ...Array.from({ length: 1_000 }, () => ({ type: "paragraph" }))],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues).toContainEqual({
+      code: "invalid_node",
+      message: "Node must be an object",
+      path: ["content", 0],
+    });
+    expect(result.error.issues).toContainEqual({
+      code: "max_nodes",
+      message: "Document contains too many nodes",
+      path: ["content", 1_000],
+    });
+    expect(result.error.issues.filter((issue) => issue.code === "max_nodes")).toHaveLength(1);
+  });
+
+  it("caps diagnostics and stops traversing after the issue budget", () => {
+    const malformed: Record<string, unknown> = { type: "paragraph" };
+    for (let index = 0; index < 128; index += 1) {
+      malformed[`unknown${index}`] = true;
+    }
+
+    const result = validateContentDocument(CONTENT_VERSION, {
+      type: "doc",
+      content: [malformed, { type: "paragraph", extra: true }],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues).toHaveLength(64);
+    expect(result.error.issues.every((issue) => issue.code === "unknown_key")).toBe(true);
+    expect(result.error.issues.at(-1)).toEqual({
+      code: "unknown_key",
+      message: "Unknown property is not allowed",
+      path: ["content", 0, "unknown63"],
+    });
+    expect(result.error.issues.some((issue) => issue.path[1] === 1)).toBe(false);
+  });
+
+  it("caps total canonical text length across text nodes", () => {
+    const result = validateContentDocument(CONTENT_VERSION, {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "a".repeat(600_000) }] },
+        { type: "paragraph", content: [{ type: "text", text: "b".repeat(600_000) }] },
+        { type: "paragraph", content: [{ type: "text", text: "after" }] },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues).toEqual([
+      {
+        code: "max_total_text_length",
+        message: "Total text content is too long",
+        path: ["content", 1, "content", 0, "text"],
+      },
+    ]);
+  });
+
   it("rejects line breaks in code-marked text with a stable issue", () => {
     const result = validateContentDocument(CONTENT_VERSION, {
       type: "doc",
