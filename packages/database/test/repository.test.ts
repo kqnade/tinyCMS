@@ -108,6 +108,460 @@ describe("editorial repository", () => {
     await expect(repository.getRevision(input.revision.id)).resolves.toEqual(created.revision);
   });
 
+  it("appends sequential immutable revisions", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e601",
+        accessSubject: "subject-repository-append-initial",
+        displayName: "Initial Author",
+        createdAt: 1_700_000_000_100,
+        updatedAt: 1_700_000_000_100,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e602",
+        slug: "repository-append-sequential",
+        createdAt: 1_700_000_000_101,
+        updatedAt: 1_700_000_000_101,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e603",
+        version: 1,
+        title: "Initial snapshot",
+        contentVersion: 2,
+        contentJson: '{"type":"doc","children":[{"text":"initial"}]}',
+        excerpt: "Initial excerpt",
+        metadataJson: '{"template":"article","stage":"initial"}',
+        createdAt: 1_700_000_000_102,
+      },
+    });
+
+    const secondAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e604";
+    const thirdAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e605";
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        secondAuthorId,
+        "subject-repository-append-second",
+        "Second Author",
+        1_700_000_000_103,
+        1_700_000_000_103,
+      )
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        thirdAuthorId,
+        "subject-repository-append-third",
+        "Third Author",
+        1_700_000_000_104,
+        1_700_000_000_104,
+      )
+      .run();
+
+    const second = await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: secondAuthorId,
+      expectedVersion: 1,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e606",
+        title: "Second snapshot",
+        contentVersion: 7,
+        contentJson: '{"type":"doc","children":[{"text":"second"}]}',
+        excerpt: "Second excerpt",
+        metadataJson: '{"template":"article","stage":"second"}',
+        createdAt: 1_700_000_000_105,
+      },
+    });
+    const third = await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: thirdAuthorId,
+      expectedVersion: 2,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e607",
+        title: "Third snapshot",
+        contentVersion: 11,
+        contentJson: '{"type":"doc","children":[{"text":"third"}]}',
+        excerpt: "Third excerpt",
+        metadataJson: '{"template":"article","stage":"third"}',
+        createdAt: 1_700_000_000_106,
+      },
+    });
+
+    expect(second).toMatchObject({
+      id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e606",
+      postId: initial.post.id,
+      version: 2,
+      title: "Second snapshot",
+      contentVersion: 7,
+      contentJson: '{"type":"doc","children":[{"text":"second"}]}',
+      excerpt: "Second excerpt",
+      metadataJson: '{"template":"article","stage":"second"}',
+      authorId: secondAuthorId,
+      createdAt: 1_700_000_000_105,
+    });
+    expect(third).toMatchObject({
+      id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e607",
+      postId: initial.post.id,
+      version: 3,
+      title: "Third snapshot",
+      contentVersion: 11,
+      contentJson: '{"type":"doc","children":[{"text":"third"}]}',
+      excerpt: "Third excerpt",
+      metadataJson: '{"template":"article","stage":"third"}',
+      authorId: thirdAuthorId,
+      createdAt: 1_700_000_000_106,
+    });
+
+    const aggregate = await repository.getPostAggregate(initial.post.id);
+    expect(aggregate.revisions.map((revision) => revision.version)).toEqual([1, 2, 3]);
+    expect(aggregate.revisions[0]).toEqual(initial.revision);
+  });
+
+  it("restores only same-post revisions as new immutable snapshots", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const target = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea01",
+        accessSubject: "subject-repository-restore-target",
+        displayName: "Restore Target Author",
+        createdAt: 1_700_000_001_000,
+        updatedAt: 1_700_000_001_000,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea02",
+        slug: "repository-restore-target",
+        createdAt: 1_700_000_001_001,
+        updatedAt: 1_700_000_001_001,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea03",
+        version: 1,
+        title: "Original snapshot",
+        contentVersion: 3,
+        contentJson: '{"type":"doc","children":[{"text":"original"}]}',
+        excerpt: "Original excerpt",
+        metadataJson: '{"template":"article","stage":"original"}',
+        createdAt: 1_700_000_001_002,
+      },
+    });
+    const restoreAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea04";
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        restoreAuthorId,
+        "subject-repository-restore-author",
+        "Restore Author",
+        1_700_000_001_003,
+        1_700_000_001_003,
+      )
+      .run();
+
+    const second = await repository.appendRevision({
+      postId: target.post.id,
+      authorId: target.author.id,
+      expectedVersion: 1,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea05",
+        title: "Changed snapshot",
+        contentVersion: 8,
+        contentJson: '{"type":"doc","children":[{"text":"changed"}]}',
+        excerpt: "Changed excerpt",
+        metadataJson: '{"template":"article","stage":"changed"}',
+        createdAt: 1_700_000_001_004,
+      },
+    });
+    const restored = await repository.restoreRevision({
+      postId: target.post.id,
+      sourceRevisionId: target.revision.id,
+      expectedVersion: 2,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea06",
+      authorId: restoreAuthorId,
+      createdAt: 1_700_000_001_005,
+    });
+
+    expect(restored).toEqual({
+      id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea06",
+      postId: target.post.id,
+      version: 3,
+      title: target.revision.title,
+      contentVersion: target.revision.contentVersion,
+      contentJson: target.revision.contentJson,
+      excerpt: target.revision.excerpt,
+      metadataJson: target.revision.metadataJson,
+      authorId: restoreAuthorId,
+      createdAt: 1_700_000_001_005,
+    });
+    const restoredTarget = await repository.getPostAggregate(target.post.id);
+    expect(restoredTarget.revisions.map((revision) => revision.version)).toEqual([1, 2, 3]);
+    expect(restoredTarget.revisions).toEqual([target.revision, second, restored]);
+
+    const foreign = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea07",
+        accessSubject: "subject-repository-restore-foreign",
+        displayName: "Foreign Author",
+        createdAt: 1_700_000_001_006,
+        updatedAt: 1_700_000_001_006,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea08",
+        slug: "repository-restore-foreign",
+        createdAt: 1_700_000_001_007,
+        updatedAt: 1_700_000_001_007,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea09",
+        version: 1,
+        title: "Foreign snapshot",
+        contentVersion: 5,
+        contentJson: '{"type":"doc","children":[{"text":"foreign"}]}',
+        excerpt: "Foreign excerpt",
+        metadataJson: '{"template":"foreign"}',
+        createdAt: 1_700_000_001_008,
+      },
+    });
+    const targetBeforeRejectedRestore = await repository.getPostAggregate(target.post.id);
+    const foreignBeforeRejectedRestore = await repository.getPostAggregate(foreign.post.id);
+    const rejectedRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea0a";
+    const absentSourceRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ea0b";
+
+    let absentError: unknown;
+    try {
+      await repository.restoreRevision({
+        postId: target.post.id,
+        sourceRevisionId: absentSourceRevisionId,
+        expectedVersion: 3,
+        revisionId: rejectedRevisionId,
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_001_009,
+      });
+    } catch (cause) {
+      absentError = cause;
+    }
+    expect(absentError).toBeInstanceOf(RepositoryError);
+    const absentRepositoryError = absentError as RepositoryError;
+    expect(absentRepositoryError).toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+
+    let crossPostError: unknown;
+    try {
+      await repository.restoreRevision({
+        postId: target.post.id,
+        sourceRevisionId: foreign.revision.id,
+        expectedVersion: 3,
+        revisionId: rejectedRevisionId,
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_001_010,
+      });
+    } catch (cause) {
+      crossPostError = cause;
+    }
+    expect(crossPostError).toBeInstanceOf(RepositoryError);
+    const crossPostRepositoryError = crossPostError as RepositoryError;
+    expect(crossPostRepositoryError).toMatchObject({
+      code: absentRepositoryError.code,
+      message: absentRepositoryError.message,
+    });
+    expect(crossPostRepositoryError.message).toBe(absentRepositoryError.message);
+
+    await expect(repository.getPostAggregate(target.post.id)).resolves.toEqual(
+      targetBeforeRejectedRestore,
+    );
+    await expect(repository.getPostAggregate(foreign.post.id)).resolves.toEqual(
+      foreignBeforeRejectedRestore,
+    );
+    await expect(repository.getRevision(rejectedRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
+
+  it("rejects stale revision restores without changing history", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec01",
+        accessSubject: "subject-repository-restore-stale",
+        displayName: "Stale Restore Author",
+        createdAt: 1_700_000_001_100,
+        updatedAt: 1_700_000_001_100,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec02",
+        slug: "repository-restore-stale",
+        createdAt: 1_700_000_001_101,
+        updatedAt: 1_700_000_001_101,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec03",
+        version: 1,
+        title: "Initial stale restore snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc","children":[{"text":"initial"}]}',
+        createdAt: 1_700_000_001_102,
+      },
+    });
+    await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: initial.author.id,
+      expectedVersion: 1,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec04",
+        title: "Current stale restore snapshot",
+        contentVersion: 2,
+        contentJson: '{"type":"doc","children":[{"text":"current"}]}',
+        createdAt: 1_700_000_001_103,
+      },
+    });
+    const historyBeforeRestore = await repository.getPostAggregate(initial.post.id);
+    const rejectedRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec05";
+
+    let error: unknown;
+    try {
+      await repository.restoreRevision({
+        postId: initial.post.id,
+        sourceRevisionId: initial.revision.id,
+        expectedVersion: 1,
+        revisionId: rejectedRevisionId,
+        authorId: initial.author.id,
+        createdAt: 1_700_000_001_104,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({ code: RepositoryErrorCode.CONFLICT });
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(
+      historyBeforeRestore,
+    );
+    await expect(repository.getRevision(rejectedRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
+
+  it("rejects stale revision appends", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e801",
+        accessSubject: "subject-repository-append-stale",
+        displayName: "Stale Append Author",
+        createdAt: 1_700_000_000_200,
+        updatedAt: 1_700_000_000_200,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e802",
+        slug: "repository-append-stale",
+        createdAt: 1_700_000_000_201,
+        updatedAt: 1_700_000_000_201,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e803",
+        version: 1,
+        title: "Initial stale append snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc"}',
+        createdAt: 1_700_000_000_202,
+      },
+    });
+
+    const second = await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: initial.author.id,
+      expectedVersion: 1,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e804",
+        title: "Second stale append snapshot",
+        contentVersion: 2,
+        contentJson: '{"type":"doc","children":[{"text":"second"}]}',
+        createdAt: 1_700_000_000_203,
+      },
+    });
+
+    expect(second.version).toBe(2);
+    let error: unknown;
+    try {
+      await repository.appendRevision({
+        postId: initial.post.id,
+        authorId: initial.author.id,
+        expectedVersion: 1,
+        revision: {
+          id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e805",
+          title: "Rejected stale snapshot",
+          contentVersion: 3,
+          contentJson: '{"type":"doc","children":[{"text":"stale"}]}',
+          createdAt: 1_700_000_000_204,
+        },
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({ code: RepositoryErrorCode.CONFLICT });
+
+    const aggregate = await repository.getPostAggregate(initial.post.id);
+    expect(aggregate.revisions.map((revision) => revision.version)).toEqual([1, 2]);
+  });
+
+  it("rejects revision appends for missing posts", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const existing = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e901",
+        accessSubject: "subject-repository-append-missing-post",
+        displayName: "Missing Post Author",
+        createdAt: 1_700_000_000_300,
+        updatedAt: 1_700_000_000_300,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e902",
+        slug: "repository-append-missing-post-author",
+        createdAt: 1_700_000_000_301,
+        updatedAt: 1_700_000_000_301,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e903",
+        version: 1,
+        title: "Existing author post",
+        contentVersion: 1,
+        contentJson: '{"type":"doc"}',
+        createdAt: 1_700_000_000_302,
+      },
+    });
+    const missingPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e904";
+    const callerRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e905";
+
+    let error: unknown;
+    try {
+      await repository.appendRevision({
+        postId: missingPostId,
+        authorId: existing.author.id,
+        expectedVersion: 0,
+        revision: {
+          id: callerRevisionId,
+          title: "Missing post revision",
+          contentVersion: 1,
+          contentJson: '{"type":"doc","children":[]}',
+          createdAt: 1_700_000_000_303,
+        },
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({ code: RepositoryErrorCode.NOT_FOUND });
+    await expect(repository.getRevision(callerRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
+
   it("returns created rows without post-commit readbacks", async () => {
     const repository = createEditorialRepository(databaseThatRejectsPostCommitSelects(env.TEST_DB));
     const created = await repository.createAuthorPostRevision({

@@ -10,6 +10,7 @@ export type PostRevision = typeof postRevisions.$inferSelect;
 export type SearchChunk = typeof searchChunks.$inferSelect;
 
 export const RepositoryErrorCode = {
+  CONFLICT: "CONFLICT",
   NOT_FOUND: "NOT_FOUND",
   READ_FAILED: "READ_FAILED",
   WRITE_FAILED: "WRITE_FAILED",
@@ -59,6 +60,22 @@ export interface CreateRevisionInput {
   createdAt: number;
 }
 
+export interface AppendRevisionInput {
+  postId: string;
+  authorId: string;
+  expectedVersion: number;
+  revision: Omit<CreateRevisionInput, "version">;
+}
+
+export interface RestoreRevisionInput {
+  postId: string;
+  sourceRevisionId: string;
+  expectedVersion: number;
+  revisionId: string;
+  authorId: string;
+  createdAt: number;
+}
+
 export interface CreateAuthorPostRevisionInput {
   author: CreateAuthorInput;
   post: CreatePostInput;
@@ -80,6 +97,8 @@ export interface EditorialRepository {
   createAuthorPostRevision(
     input: CreateAuthorPostRevisionInput,
   ): Promise<CreatedAuthorPostRevision>;
+  appendRevision(input: AppendRevisionInput): Promise<PostRevision>;
+  restoreRevision(input: RestoreRevisionInput): Promise<PostRevision>;
   getAuthor(id: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
@@ -283,8 +302,145 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     }
   };
 
+  const appendRevision = async ({
+    postId,
+    authorId,
+    expectedVersion,
+    revision,
+  }: AppendRevisionInput): Promise<PostRevision> => {
+    try {
+      const result = await database
+        .prepare(
+          `INSERT INTO post_revisions (
+             id, post_id, version, title, content_version, content_json,
+             excerpt, metadata_json, author_id, created_at
+           )
+           SELECT ?, ?, MAX(version) + 1, ?, ?, ?, ?, ?, ?, ?
+           FROM post_revisions
+           WHERE post_id = ?
+           HAVING MAX(version) = ?
+           RETURNING id, post_id AS "postId", version, title,
+             content_version AS "contentVersion", content_json AS "contentJson",
+             excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+             created_at AS "createdAt"`,
+        )
+        .bind(
+          revision.id,
+          postId,
+          revision.title,
+          revision.contentVersion,
+          revision.contentJson,
+          revision.excerpt ?? null,
+          revision.metadataJson ?? "{}",
+          authorId,
+          revision.createdAt,
+          postId,
+          expectedVersion,
+        )
+        .all<PostRevision>();
+      const appendedRevision = result.results[0];
+      if (appendedRevision === undefined) {
+        const post = await database
+          .prepare("SELECT id FROM posts WHERE id = ?")
+          .bind(postId)
+          .first<{ id: string }>();
+        if (post === null) {
+          throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post was not found");
+        }
+        throw new RepositoryError(
+          RepositoryErrorCode.CONFLICT,
+          "Revision append conflicted with a newer version",
+        );
+      }
+      return appendedRevision;
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to append post revision",
+        cause,
+      );
+    }
+  };
+
+  const restoreRevision = async ({
+    postId,
+    sourceRevisionId,
+    expectedVersion,
+    revisionId,
+    authorId,
+    createdAt,
+  }: RestoreRevisionInput): Promise<PostRevision> => {
+    try {
+      const result = await database
+        .prepare(
+          `INSERT INTO post_revisions (
+             id, post_id, version, title, content_version, content_json,
+             excerpt, metadata_json, author_id, created_at
+           )
+           SELECT ?, source.post_id, current.version + 1, source.title,
+             source.content_version, source.content_json, source.excerpt,
+             source.metadata_json, ?, ?
+           FROM post_revisions AS source
+           JOIN (
+             SELECT post_id, MAX(version) AS version
+             FROM post_revisions
+             WHERE post_id = ?
+             GROUP BY post_id
+           ) AS current ON current.post_id = source.post_id
+           WHERE source.id = ?
+             AND source.post_id = ?
+             AND current.version = ?
+           RETURNING id, post_id AS "postId", version, title,
+             content_version AS "contentVersion", content_json AS "contentJson",
+             excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+             created_at AS "createdAt"`,
+        )
+        .bind(revisionId, authorId, createdAt, postId, sourceRevisionId, postId, expectedVersion)
+        .all<PostRevision>();
+      const restoredRevision = result.results[0];
+      if (restoredRevision !== undefined) {
+        return restoredRevision;
+      }
+
+      const post = await database
+        .prepare("SELECT id FROM posts WHERE id = ?")
+        .bind(postId)
+        .first<{ id: string }>();
+      if (post === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post was not found");
+      }
+
+      const source = await database
+        .prepare("SELECT id FROM post_revisions WHERE id = ? AND post_id = ?")
+        .bind(sourceRevisionId, postId)
+        .first<{ id: string }>();
+      if (source === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post revision was not found");
+      }
+
+      throw new RepositoryError(
+        RepositoryErrorCode.CONFLICT,
+        "Revision restore conflicted with a newer version",
+      );
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to restore post revision",
+        cause,
+      );
+    }
+  };
+
   return {
     createAuthorPostRevision,
+    appendRevision,
+    restoreRevision,
     getAuthor,
     getPost,
     getPostBySlug,
