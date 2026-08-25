@@ -12,7 +12,7 @@ const SECURITY_HEADERS = {
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
 } as const;
 
-function expectSafeResponseHeaders(response: Response, cacheControl: string) {
+function expectSafeResponseHeaders(response: Response, cacheControl: string | null) {
   expect(response.headers.get("Cache-Control")).toBe(cacheControl);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     expect(response.headers.get(name)).toBe(value);
@@ -243,5 +243,23 @@ describe("public worker", () => {
     expect(response.headers.get("Strict-Transport-Security")).toBe(
       "max-age=31536000; includeSubDomains",
     );
+  });
+
+  it("applies boundary headers to immutable route responses", async () => {
+    const redirectLocation = "https://public.example.test/article";
+    const redirectResponse = Response.redirect(redirectLocation, 302);
+    expect(() => redirectResponse.headers.set("X-Test", "immutable")).toThrow(TypeError);
+    const testApp = createPublicApp((configuredApp) => {
+      configuredApp.get("/redirect", () => redirectResponse);
+    });
+
+    const response = await testApp.fetch(new Request("https://public.example.test/redirect"));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(redirectLocation);
+    expect(response.headers.get("X-Request-Id")).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expectSafeResponseHeaders(response, null);
   });
 });

@@ -42,13 +42,17 @@ export function createPublicApp(registerRoutes?: RouteRegistrar) {
       context.res = internalErrorResponse(error, context);
     }
 
+    const routeResponse = context.res;
+    context.res = new Response(routeResponse.body, routeResponse);
+    const responseHeaders = context.res.headers;
+
     if (context.res.status >= 400) {
-      context.header("Cache-Control", "no-store");
+      responseHeaders.set("Cache-Control", "no-store");
     }
-    context.header("X-Request-Id", requestId);
+    responseHeaders.set("X-Request-Id", requestId);
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
-      if (!context.res.headers.has(name)) {
-        context.header(name, value);
+      if (!responseHeaders.has(name)) {
+        responseHeaders.set(name, value);
       }
     }
   });
