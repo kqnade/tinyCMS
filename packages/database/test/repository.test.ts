@@ -380,6 +380,70 @@ describe("editorial repository", () => {
     });
   });
 
+  it("rejects stale revision restores without changing history", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec01",
+        accessSubject: "subject-repository-restore-stale",
+        displayName: "Stale Restore Author",
+        createdAt: 1_700_000_001_100,
+        updatedAt: 1_700_000_001_100,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec02",
+        slug: "repository-restore-stale",
+        createdAt: 1_700_000_001_101,
+        updatedAt: 1_700_000_001_101,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec03",
+        version: 1,
+        title: "Initial stale restore snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc","children":[{"text":"initial"}]}',
+        createdAt: 1_700_000_001_102,
+      },
+    });
+    await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: initial.author.id,
+      expectedVersion: 1,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec04",
+        title: "Current stale restore snapshot",
+        contentVersion: 2,
+        contentJson: '{"type":"doc","children":[{"text":"current"}]}',
+        createdAt: 1_700_000_001_103,
+      },
+    });
+    const historyBeforeRestore = await repository.getPostAggregate(initial.post.id);
+    const rejectedRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ec05";
+
+    let error: unknown;
+    try {
+      await repository.restoreRevision({
+        postId: initial.post.id,
+        sourceRevisionId: initial.revision.id,
+        expectedVersion: 1,
+        revisionId: rejectedRevisionId,
+        authorId: initial.author.id,
+        createdAt: 1_700_000_001_104,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({ code: RepositoryErrorCode.CONFLICT });
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(
+      historyBeforeRestore,
+    );
+    await expect(repository.getRevision(rejectedRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
+
   it("rejects stale revision appends", async () => {
     const repository = createEditorialRepository(env.TEST_DB);
     const initial = await repository.createAuthorPostRevision({
