@@ -285,6 +285,59 @@ describe("editorial repository", () => {
     expect(aggregate.revisions.map((revision) => revision.version)).toEqual([1, 2]);
   });
 
+  it("rejects revision appends for missing posts", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const existing = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e901",
+        accessSubject: "subject-repository-append-missing-post",
+        displayName: "Missing Post Author",
+        createdAt: 1_700_000_000_300,
+        updatedAt: 1_700_000_000_300,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e902",
+        slug: "repository-append-missing-post-author",
+        createdAt: 1_700_000_000_301,
+        updatedAt: 1_700_000_000_301,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e903",
+        version: 1,
+        title: "Existing author post",
+        contentVersion: 1,
+        contentJson: '{"type":"doc"}',
+        createdAt: 1_700_000_000_302,
+      },
+    });
+    const missingPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e904";
+    const callerRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e905";
+
+    let error: unknown;
+    try {
+      await repository.appendRevision({
+        postId: missingPostId,
+        authorId: existing.author.id,
+        expectedVersion: 0,
+        revision: {
+          id: callerRevisionId,
+          title: "Missing post revision",
+          contentVersion: 1,
+          contentJson: '{"type":"doc","children":[]}',
+          createdAt: 1_700_000_000_303,
+        },
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({ code: RepositoryErrorCode.NOT_FOUND });
+    await expect(repository.getRevision(callerRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
+
   it("returns created rows without post-commit readbacks", async () => {
     const repository = createEditorialRepository(databaseThatRejectsPostCommitSelects(env.TEST_DB));
     const created = await repository.createAuthorPostRevision({

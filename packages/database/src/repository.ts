@@ -330,6 +330,13 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
         .all<PostRevision>();
       const appendedRevision = result.results[0];
       if (appendedRevision === undefined) {
+        const post = await database
+          .prepare("SELECT id FROM posts WHERE id = ?")
+          .bind(postId)
+          .first<{ id: string }>();
+        if (post === null) {
+          throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post was not found");
+        }
         throw new RepositoryError(
           RepositoryErrorCode.CONFLICT,
           "Revision append conflicted with a newer version",
