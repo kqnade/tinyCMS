@@ -1,5 +1,5 @@
 import { errorResponse, successResponse } from "@tinycms/contracts";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 
 type PublicWorker = {
   Variables: {
@@ -19,6 +19,16 @@ const SECURITY_HEADERS = {
 
 type RouteRegistrar = (app: Hono<PublicWorker>) => void;
 
+function internalErrorResponse(error: unknown, context: Context<PublicWorker>) {
+  const requestId = context.get("requestId");
+  console.error("Unhandled request error", {
+    requestId,
+    errorCategory: error instanceof Error ? "Error" : "Unknown",
+  });
+  context.header("Cache-Control", "no-store");
+  return context.json(errorResponse("INTERNAL_ERROR", "Internal server error", requestId), 500);
+}
+
 export function createPublicApp(registerRoutes?: RouteRegistrar) {
   const app = new Hono<PublicWorker>();
 
@@ -26,11 +36,20 @@ export function createPublicApp(registerRoutes?: RouteRegistrar) {
     const requestId = crypto.randomUUID();
     context.set("requestId", requestId);
 
-    await next();
+    try {
+      await next();
+    } catch (error) {
+      context.res = internalErrorResponse(error, context);
+    }
 
+    if (context.res.status >= 400) {
+      context.header("Cache-Control", "no-store");
+    }
     context.header("X-Request-Id", requestId);
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
-      context.header(name, value);
+      if (!context.res.headers.has(name)) {
+        context.header(name, value);
+      }
     }
   });
 
@@ -46,15 +65,7 @@ export function createPublicApp(registerRoutes?: RouteRegistrar) {
     return context.json(errorResponse("NOT_FOUND", "Not found", context.get("requestId")), 404);
   });
 
-  app.onError((error, context) => {
-    const requestId = context.get("requestId");
-    console.error("Unhandled request error", {
-      requestId,
-      errorCategory: error instanceof Error ? "Error" : "Unknown",
-    });
-    context.header("Cache-Control", "no-store");
-    return context.json(errorResponse("INTERNAL_ERROR", "Internal server error", requestId), 500);
-  });
+  app.onError(internalErrorResponse);
 
   return app;
 }

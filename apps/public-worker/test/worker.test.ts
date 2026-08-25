@@ -33,6 +33,23 @@ function serializeLogArguments(argumentsList: unknown[]) {
   });
 }
 
+async function expectGenericErrorResponse(response: Response) {
+  const requestId = response.headers.get("X-Request-Id");
+  const body = await response.json();
+
+  expect(response.status).toBe(500);
+  expectSafeResponseHeaders(response, "no-store");
+  expect(body).toEqual({
+    error: {
+      code: "INTERNAL_ERROR",
+      message: "Internal server error",
+      requestId,
+    },
+  });
+
+  return { body, requestId };
+}
+
 describe("public worker", () => {
   it("reports health with a generated request ID", async () => {
     const response = await exports.default.fetch("https://public.example.test/healthz");
@@ -94,18 +111,7 @@ describe("public worker", () => {
 
     try {
       const response = await testApp.fetch(new Request("https://public.example.test/test-error"));
-      const requestId = response.headers.get("X-Request-Id");
-      const body = await response.json();
-
-      expect(response.status).toBe(500);
-      expectSafeResponseHeaders(response, "no-store");
-      expect(body).toEqual({
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "Internal server error",
-          requestId,
-        },
-      });
+      const { body, requestId } = await expectGenericErrorResponse(response);
       expect(JSON.stringify(body)).not.toContain("database secret");
       const serializedLogArguments = serializeLogArguments(errorSpy.mock.calls);
       expect(serializedLogArguments).not.toContain(originalError.message);
@@ -122,6 +128,82 @@ describe("public worker", () => {
     }
   });
 
+  it("normalizes synchronously thrown non-Error values", async () => {
+    const testSecret = "synchronous secret";
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const testApp = createPublicApp((configuredApp) => {
+      configuredApp.get("/test-non-error", () => {
+        throw testSecret;
+      });
+    });
+
+    try {
+      const response = await testApp.fetch(
+        new Request("https://public.example.test/test-non-error"),
+      );
+      const { requestId } = await expectGenericErrorResponse(response);
+      expect(serializeLogArguments(errorSpy.mock.calls)).not.toContain(testSecret);
+      expect(errorSpy).toHaveBeenCalledWith("Unhandled request error", {
+        requestId,
+        errorCategory: "Unknown",
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("normalizes asynchronously thrown non-Error values", async () => {
+    const testSecret = "asynchronous secret";
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const testApp = createPublicApp((configuredApp) => {
+      configuredApp.get("/test-async-non-error", async () => {
+        await Promise.resolve();
+        throw { detail: testSecret };
+      });
+    });
+
+    try {
+      const response = await testApp.fetch(
+        new Request("https://public.example.test/test-async-non-error"),
+      );
+      const { requestId } = await expectGenericErrorResponse(response);
+      expect(serializeLogArguments(errorSpy.mock.calls)).not.toContain(testSecret);
+      expect(errorSpy).toHaveBeenCalledWith("Unhandled request error", {
+        requestId,
+        errorCategory: "Unknown",
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("marks route-produced client errors as no-store", async () => {
+    const testApp = createPublicApp((configuredApp) => {
+      configuredApp.get("/bad-request", (context) => {
+        return context.json({ error: "Bad request" }, 400);
+      });
+    });
+
+    const response = await testApp.fetch(new Request("https://public.example.test/bad-request"));
+
+    expect(response.status).toBe(400);
+    expectSafeResponseHeaders(response, "no-store");
+  });
+
+  it("overrides cacheable policies on route-produced server errors", async () => {
+    const testApp = createPublicApp((configuredApp) => {
+      configuredApp.get("/unavailable", (context) => {
+        context.header("Cache-Control", "public, max-age=60");
+        return context.json({ error: "Unavailable" }, 503);
+      });
+    });
+
+    const response = await testApp.fetch(new Request("https://public.example.test/unavailable"));
+
+    expect(response.status).toBe(503);
+    expectSafeResponseHeaders(response, "no-store");
+  });
+
   it("preserves route-specific cache headers on other successful responses", async () => {
     const testApp = createPublicApp((configuredApp) => {
       configuredApp.get("/article", (context) => {
@@ -135,5 +217,31 @@ describe("public worker", () => {
     expect(response.status).toBe(200);
     expectSafeResponseHeaders(response, "public, max-age=60");
     expect(await response.text()).toBe("article");
+  });
+
+  it("preserves route-specific security policies", async () => {
+    const routeCsp =
+      "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:";
+    const testApp = createPublicApp((configuredApp) => {
+      configuredApp.get("/article-policy", (context) => {
+        context.header("Content-Security-Policy", routeCsp);
+        context.header("Referrer-Policy", "no-referrer");
+        return context.text("article");
+      });
+    });
+
+    const response = await testApp.fetch(new Request("https://public.example.test/article-policy"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Security-Policy")).toBe(routeCsp);
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(response.headers.get("Permissions-Policy")).toBe(
+      "camera=(), geolocation=(), microphone=()",
+    );
+    expect(response.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(response.headers.get("Strict-Transport-Security")).toBe(
+      "max-age=31536000; includeSubDomains",
+    );
   });
 });
