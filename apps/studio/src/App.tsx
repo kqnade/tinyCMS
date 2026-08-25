@@ -1,95 +1,118 @@
-import { Badge, Button, Card, Field, Input } from "./ui";
+import { type ReactNode, useState } from "react";
+import { Button } from "./ui";
 
-const statusId = "studio-status";
+type IconName = "document" | "image" | "menu" | "publish" | "save" | "settings" | "sparkle";
+
+function Icon({ name }: { name: IconName }) {
+  const paths: Record<IconName, ReactNode> = {
+    document: (
+      <>
+        <path d="M6 3h9l3 3v15H6z" />
+        <path d="M15 3v4h4M9 12h6M9 16h6" />
+      </>
+    ),
+    image: (
+      <>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <circle cx="9" cy="9" r="1.5" />
+        <path d="m4 17 5-5 4 4 2-2 5 5" />
+      </>
+    ),
+    menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+    publish: (
+      <>
+        <path d="M12 19V5" />
+        <path d="m7 10 5-5 5 5" />
+      </>
+    ),
+    save: (
+      <>
+        <path d="M5 4h12l2 2v14H5z" />
+        <path d="M8 4v6h8V4M8 20v-6h8v6" />
+      </>
+    ),
+    settings: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5L9 6.1a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L5 11a7 7 0 0 0 0 2l-2.1 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.5 3.1h5l.5-3.1a7 7 0 0 0 1.7-1l2.4 1 2-3.4L19 13a7 7 0 0 0 0-1Z" />
+      </>
+    ),
+    sparkle: (
+      <path d="m12 3 1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4zM18 15l.7 2.3L21 18l-2.3.7L18 21l-.7-2.3L15 18l2.3-.7z" />
+    ),
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="studio-icon"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.7"
+    >
+      {paths[name]}
+    </svg>
+  );
+}
 
 export function App() {
+  const [panelOpen, setPanelOpen] = useState(false);
+
   return (
-    <div className="studio-shell">
+    <div className="studio-shell" data-panel-open={panelOpen}>
       <header className="studio-header">
-        <a className="studio-brand" href="/">
-          tinyCMS
-        </a>
-        <nav aria-label="Studio">
-          <a aria-current="page" href="/">
-            概要
-          </a>
-        </nav>
+        <Button
+          aria-label={panelOpen ? "Close menu" : "Open menu"}
+          aria-controls="studio-side-panel"
+          aria-expanded={panelOpen}
+          className="studio-icon-button"
+          onClick={() => setPanelOpen((open) => !open)}
+          variant="ghost"
+        >
+          <Icon name="menu" />
+        </Button>
+
+        <div className="studio-document-actions">
+          <span aria-label="Draft" className="studio-status-dot" role="status" />
+          <Button aria-label="Save" className="studio-icon-button" disabled variant="ghost">
+            <Icon name="save" />
+          </Button>
+          <Button aria-label="Publish" className="studio-icon-button" disabled variant="ghost">
+            <Icon name="publish" />
+          </Button>
+        </div>
       </header>
 
+      <aside
+        aria-label="Menu"
+        className="studio-side-panel"
+        hidden={!panelOpen}
+        id="studio-side-panel"
+      >
+        <nav aria-label="Studio">
+          <Button aria-label="Posts" className="studio-icon-button" disabled variant="ghost">
+            <Icon name="document" />
+          </Button>
+          <Button aria-label="Media" className="studio-icon-button" disabled variant="ghost">
+            <Icon name="image" />
+          </Button>
+          <Button aria-label="AI assist" className="studio-icon-button" disabled variant="ghost">
+            <Icon name="sparkle" />
+          </Button>
+          <Button aria-label="Settings" className="studio-icon-button" disabled variant="ghost">
+            <Icon name="settings" />
+          </Button>
+        </nav>
+      </aside>
+
       <main className="studio-main">
-        <div className="studio-heading">
-          <p className="studio-kicker">ワークスペース</p>
-          <h1>tinyCMS Studio</h1>
-          <p>文章を書き、公開するための静かな作業場所です。</p>
-        </div>
-
-        <div className="studio-workspace">
-          <section className="studio-editor" aria-labelledby="workspace-heading">
-            <div className="studio-section-heading">
-              <div>
-                <p className="studio-kicker">編集</p>
-                <h2 id="workspace-heading">投稿を準備する</h2>
-              </div>
-              <Badge>下書き</Badge>
-            </div>
-
-            <div className="studio-fields">
-              <Field id="search-posts" label="投稿を検索" helpText="検索機能は準備中です。">
-                <Input type="search" disabled placeholder="タイトルやタグを検索" />
-              </Field>
-              <Field id="post-title" label="タイトル" helpText="編集機能は準備中です。">
-                <Input disabled placeholder="タイトルを入力" />
-              </Field>
-              <Field id="post-body" label="本文" helpText="本文エディターは準備中です。">
-                <Input disabled placeholder="本文を入力" />
-              </Field>
-            </div>
-
-            <div className="studio-actions">
-              <Button disabled aria-describedby={statusId}>
-                下書きを保存
-              </Button>
-              <Button variant="primary" disabled aria-describedby={statusId}>
-                公開する
-              </Button>
-            </div>
-          </section>
-
-          <aside className="studio-sidebar" aria-label="投稿ツール">
-            <Card className="studio-status-card" as="section" role="status" id={statusId}>
-              <div className="studio-card-heading">
-                <h2>現在の状態</h2>
-                <Badge tone="warning">準備中</Badge>
-              </div>
-              <p>保存、公開、検索、画像アップロード、AIアシストは準備中です。</p>
-            </Card>
-
-            <Card as="section" variant="subtle" aria-labelledby="assist-heading">
-              <div className="studio-card-heading">
-                <h2 id="assist-heading">AIアシスト</h2>
-                <Badge tone="neutral">近日対応</Badge>
-              </div>
-              <p>文章の整理や推敲を手伝う機能です。</p>
-              <Button disabled aria-describedby={statusId}>
-                AIアシスト
-              </Button>
-            </Card>
-
-            <Card as="section" variant="subtle" aria-labelledby="media-heading">
-              <div className="studio-card-heading">
-                <h2 id="media-heading">画像</h2>
-                <Badge tone="neutral">近日対応</Badge>
-              </div>
-              <Field
-                id="upload-image"
-                label="画像をアップロード"
-                helpText="アップロード機能は準備中です。"
-              >
-                <Input type="file" disabled />
-              </Field>
-            </Card>
-          </aside>
-        </div>
+        <section className="studio-editor" aria-label="Editor">
+          <input aria-label="Title" className="studio-title-input" disabled type="text" />
+          <textarea aria-label="Body" className="studio-body-input" disabled rows={24} />
+        </section>
       </main>
     </div>
   );
