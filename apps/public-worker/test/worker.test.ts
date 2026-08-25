@@ -19,6 +19,20 @@ function expectSafeResponseHeaders(response: Response, cacheControl: string) {
   }
 }
 
+function serializeLogArguments(argumentsList: unknown[]) {
+  return JSON.stringify(argumentsList, (_, value) => {
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+        cause: value.cause,
+      };
+    }
+    return value;
+  });
+}
+
 describe("public worker", () => {
   it("reports health with a generated request ID", async () => {
     const response = await exports.default.fetch("https://public.example.test/healthz");
@@ -67,8 +81,10 @@ describe("public worker", () => {
     });
   });
 
-  it("returns a generic correlated error for a thrown handler and logs the original error", async () => {
-    const originalError = new Error("database secret");
+  it("returns a generic correlated error and logs only safe metadata", async () => {
+    const testSecret = "database secret";
+    const errorCause = new Error("connection secret");
+    const originalError = new Error(testSecret, { cause: errorCause });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const testApp = createPublicApp((configuredApp) => {
       configuredApp.get("/test-error", () => {
@@ -91,9 +107,15 @@ describe("public worker", () => {
         },
       });
       expect(JSON.stringify(body)).not.toContain("database secret");
+      const serializedLogArguments = serializeLogArguments(errorSpy.mock.calls);
+      expect(serializedLogArguments).not.toContain(originalError.message);
+      expect(serializedLogArguments).not.toContain(originalError.stack);
+      expect(serializedLogArguments).not.toContain(errorCause.message);
+      expect(serializedLogArguments).not.toContain(testSecret);
+      expect(serializedLogArguments).not.toMatch(/"(?:message|stack|cause)":/);
       expect(errorSpy).toHaveBeenCalledWith("Unhandled request error", {
         requestId,
-        error: originalError,
+        errorCategory: "Error",
       });
     } finally {
       errorSpy.mockRestore();

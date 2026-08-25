@@ -48,7 +48,10 @@ export function createPublicApp(registerRoutes?: RouteRegistrar) {
 
   app.onError((error, context) => {
     const requestId = context.get("requestId");
-    console.error("Unhandled request error", { requestId, error });
+    console.error("Unhandled request error", {
+      requestId,
+      errorCategory: error instanceof Error ? "Error" : "Unknown",
+    });
     context.header("Cache-Control", "no-store");
     return context.json(errorResponse("INTERNAL_ERROR", "Internal server error", requestId), 500);
   });
