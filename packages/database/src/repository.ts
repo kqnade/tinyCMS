@@ -10,6 +10,7 @@ export type PostRevision = typeof postRevisions.$inferSelect;
 export type SearchChunk = typeof searchChunks.$inferSelect;
 
 export const RepositoryErrorCode = {
+  CONFLICT: "CONFLICT",
   NOT_FOUND: "NOT_FOUND",
   READ_FAILED: "READ_FAILED",
   WRITE_FAILED: "WRITE_FAILED",
@@ -329,10 +330,16 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
         .all<PostRevision>();
       const appendedRevision = result.results[0];
       if (appendedRevision === undefined) {
-        throw new Error("Append statement returned no rows");
+        throw new RepositoryError(
+          RepositoryErrorCode.CONFLICT,
+          "Revision append conflicted with a newer version",
+        );
       }
       return appendedRevision;
     } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
       throw new RepositoryError(
         RepositoryErrorCode.WRITE_FAILED,
         "Failed to append post revision",

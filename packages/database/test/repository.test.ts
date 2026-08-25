@@ -220,6 +220,71 @@ describe("editorial repository", () => {
     expect(aggregate.revisions[0]).toEqual(initial.revision);
   });
 
+  it("rejects stale revision appends", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e801",
+        accessSubject: "subject-repository-append-stale",
+        displayName: "Stale Append Author",
+        createdAt: 1_700_000_000_200,
+        updatedAt: 1_700_000_000_200,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e802",
+        slug: "repository-append-stale",
+        createdAt: 1_700_000_000_201,
+        updatedAt: 1_700_000_000_201,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e803",
+        version: 1,
+        title: "Initial stale append snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc"}',
+        createdAt: 1_700_000_000_202,
+      },
+    });
+
+    const second = await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: initial.author.id,
+      expectedVersion: 1,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e804",
+        title: "Second stale append snapshot",
+        contentVersion: 2,
+        contentJson: '{"type":"doc","children":[{"text":"second"}]}',
+        createdAt: 1_700_000_000_203,
+      },
+    });
+
+    expect(second.version).toBe(2);
+    let error: unknown;
+    try {
+      await repository.appendRevision({
+        postId: initial.post.id,
+        authorId: initial.author.id,
+        expectedVersion: 1,
+        revision: {
+          id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e805",
+          title: "Rejected stale snapshot",
+          contentVersion: 3,
+          contentJson: '{"type":"doc","children":[{"text":"stale"}]}',
+          createdAt: 1_700_000_000_204,
+        },
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({ code: RepositoryErrorCode.CONFLICT });
+
+    const aggregate = await repository.getPostAggregate(initial.post.id);
+    expect(aggregate.revisions.map((revision) => revision.version)).toEqual([1, 2]);
+  });
+
   it("returns created rows without post-commit readbacks", async () => {
     const repository = createEditorialRepository(databaseThatRejectsPostCommitSelects(env.TEST_DB));
     const created = await repository.createAuthorPostRevision({
