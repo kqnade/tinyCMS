@@ -542,15 +542,61 @@ describe("admin worker", () => {
     expect(fetchCount).toBe(2);
   });
 
+  it("rate limits forced JWKS refreshes for distinct unknown key IDs", async () => {
+    const knownKey = await createSigningKey("known-key");
+    const firstUnknownKey = await createSigningKey("first-unknown-key");
+    const secondUnknownKey = await createSigningKey("second-unknown-key");
+    const payload = {
+      iss: ACCESS_ISSUER,
+      aud: ACCESS_AUDIENCE,
+      exp: NOW / 1000 + 900,
+    };
+    const knownAssertion = await knownKey.sign(payload);
+    const firstUnknownAssertion = await firstUnknownKey.sign(payload);
+    const secondUnknownAssertion = await secondUnknownKey.sign(payload);
+    let currentTime = NOW;
+    let fetchCount = 0;
+    const application = createAdminApp({
+      now: () => currentTime,
+      fetch: async () => {
+        fetchCount += 1;
+        return new Response(JSON.stringify({ keys: [knownKey.publicKey] }), { status: 200 });
+      },
+    });
+    const request = (assertion: string) =>
+      application.request(
+        "https://localhost/healthz",
+        { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+        ACCESS_BINDINGS,
+      );
+
+    expect((await request(knownAssertion)).status).toBe(200);
+    await expectAuthInvalid(await request(firstUnknownAssertion));
+    expect(fetchCount).toBe(2);
+
+    await expectAuthInvalid(await request(secondUnknownAssertion));
+    expect(fetchCount).toBe(2);
+
+    currentTime += 60 * 1000;
+    await expectAuthInvalid(await request(secondUnknownAssertion));
+    expect(fetchCount).toBe(3);
+  });
+
   it("does not use stale keys when rotation refresh fails", async () => {
     const oldKey = await createSigningKey("stale-old-key");
     const newKey = await createSigningKey("stale-new-key");
+    const otherNewKey = await createSigningKey("stale-other-new-key");
     const oldAssertion = await oldKey.sign({
       iss: ACCESS_ISSUER,
       aud: ACCESS_AUDIENCE,
       exp: NOW / 1000 + 900,
     });
     const newAssertion = await newKey.sign({
+      iss: ACCESS_ISSUER,
+      aud: ACCESS_AUDIENCE,
+      exp: NOW / 1000 + 900,
+    });
+    const otherNewAssertion = await otherNewKey.sign({
       iss: ACCESS_ISSUER,
       aud: ACCESS_AUDIENCE,
       exp: NOW / 1000 + 900,
@@ -579,6 +625,7 @@ describe("admin worker", () => {
 
     expect((await request(oldAssertion)).status).toBe(200);
     expect((await request(newAssertion)).status).toBe(401);
+    expect((await request(otherNewAssertion)).status).toBe(401);
     expect(fetchCount).toBe(2);
   });
 

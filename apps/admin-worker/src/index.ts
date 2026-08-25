@@ -5,6 +5,7 @@ import { decodeHeader, verify } from "hono/utils/jwt/jwt";
 import type { JWTPayload } from "hono/utils/jwt/types";
 
 const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
+const JWKS_FORCED_REFRESH_COOLDOWN_MS = 60 * 1000;
 const ACCESS_TEAM_DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+cloudflareaccess\.com$/;
 
@@ -39,6 +40,11 @@ type JwksCache = {
 type LoadedJwks = {
   fromCache: boolean;
   keys: HonoJsonWebKey[];
+};
+
+type ForcedRefreshCooldown = {
+  expiresAt: number;
+  jwksUrl: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,6 +127,7 @@ function createAccessVerifier(dependencies: AccessDependencies = {}) {
   const fetcher = dependencies.fetch ?? globalThis.fetch.bind(globalThis);
   const now = dependencies.now ?? (() => Date.now());
   let cachedJwks: JwksCache | undefined;
+  let forcedRefreshCooldown: ForcedRefreshCooldown | undefined;
 
   const loadJwks = async (config: AccessConfig, forceRefresh: boolean): Promise<LoadedJwks> => {
     const currentTime = now();
@@ -185,6 +192,20 @@ function createAccessVerifier(dependencies: AccessDependencies = {}) {
     let matchingKey = loadedJwks.keys.find((key) => key.kid === header.kid);
 
     if (!matchingKey && loadedJwks.fromCache) {
+      const currentTime = now();
+
+      if (
+        forcedRefreshCooldown?.jwksUrl === config.jwksUrl &&
+        forcedRefreshCooldown.expiresAt > currentTime
+      ) {
+        return false;
+      }
+
+      forcedRefreshCooldown = {
+        expiresAt: currentTime + JWKS_FORCED_REFRESH_COOLDOWN_MS,
+        jwksUrl: config.jwksUrl,
+      };
+
       try {
         loadedJwks = await loadJwks(config, true);
       } catch {
