@@ -398,15 +398,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
              excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
              created_at AS "createdAt"`,
         )
-        .bind(
-          revisionId,
-          authorId,
-          createdAt,
-          postId,
-          sourceRevisionId,
-          postId,
-          expectedVersion,
-        )
+        .bind(revisionId, authorId, createdAt, postId, sourceRevisionId, postId, expectedVersion)
         .all<PostRevision>();
       const restoredRevision = result.results[0];
       if (restoredRevision !== undefined) {
