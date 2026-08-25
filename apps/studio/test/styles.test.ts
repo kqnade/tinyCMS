@@ -41,6 +41,19 @@ function contrastRatio(foreground: string, background: string) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+function compositeHex(foreground: string, background: string, opacity: number) {
+  const compositeChannel = (offset: number) => {
+    const foregroundChannel = Number.parseInt(foreground.slice(offset, offset + 2), 16);
+    const backgroundChannel = Number.parseInt(background.slice(offset, offset + 2), 16);
+
+    return Math.round(foregroundChannel * opacity + backgroundChannel * (1 - opacity))
+      .toString(16)
+      .padStart(2, "0");
+  };
+
+  return `#${compositeChannel(1)}${compositeChannel(3)}${compositeChannel(5)}`;
+}
+
 function requiredToken(tokens: Record<string, string>, name: string) {
   const value = tokens[name];
 
@@ -81,6 +94,32 @@ describe("Studio styles", () => {
           ),
         ).toBeGreaterThanOrEqual(4.5);
       }
+    }
+  });
+
+  it("keeps enabled input placeholders at WCAG contrast", () => {
+    const placeholderRule = styles.match(/\.ui-input::placeholder\s*\{([\s\S]*?)\}/)?.[1];
+    const colorToken = placeholderRule?.match(/color:\s*var\((--[\w-]+)\)/)?.[1];
+    const opacityValue = placeholderRule?.match(/opacity:\s*([\d.]+)/)?.[1];
+    const [light, dark] = themeTokens();
+
+    if (!colorToken || !opacityValue || !light || !dark) {
+      throw new Error("Placeholder color, opacity, and both theme token blocks are required");
+    }
+
+    const opacity = Number(opacityValue);
+
+    expect(opacity).toBe(1);
+
+    for (const tokens of [light, dark]) {
+      const surface = requiredToken(tokens, "--surface");
+      const effectivePlaceholder = compositeHex(
+        requiredToken(tokens, colorToken),
+        surface,
+        opacity,
+      );
+
+      expect(contrastRatio(effectivePlaceholder, surface)).toBeGreaterThanOrEqual(4.5);
     }
   });
 

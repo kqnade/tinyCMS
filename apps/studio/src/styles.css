@@ -257,7 +257,7 @@ h1 {
 
 .ui-input::placeholder {
   color: var(--muted-foreground);
-  opacity: 0.76;
+  opacity: 1;
 }
 
 .ui-input:hover:not(:disabled):not([readonly]) {
