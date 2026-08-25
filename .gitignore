@@ -1,6 +1,8 @@
 node_modules/
 dist/
 coverage/
+*.tsbuildinfo
+*.log
 .wrangler/
 
 .env*
@@ -10,3 +12,5 @@ coverage/
 
 mise.local.toml
 mise.local.lock
+
+.DS_Store
