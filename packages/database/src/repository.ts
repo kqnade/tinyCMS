@@ -2,6 +2,8 @@ import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { authors, postRevisions, posts, schema, type searchChunks } from "./schema";
 
+export const MAX_SEARCH_QUERY_LENGTH = 256;
+
 export type Author = typeof authors.$inferSelect;
 export type Post = typeof posts.$inferSelect;
 export type PostRevision = typeof postRevisions.$inferSelect;
@@ -126,13 +128,19 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     if (normalized === "") {
       return [];
     }
+    if ([...normalized].length > MAX_SEARCH_QUERY_LENGTH) {
+      throw new RepositoryError(
+        RepositoryErrorCode.READ_FAILED,
+        `Search query exceeds ${MAX_SEARCH_QUERY_LENGTH} characters`,
+      );
+    }
 
     try {
       if ([...normalized].length >= 3) {
         const matchQuery = `"${normalized.replaceAll('"', '""')}"`;
         const result = await database
           .prepare(
-            "SELECT search_chunks.id, search_chunks.post_id, search_chunks.revision_id, search_chunks.chunk_index, search_chunks.title, search_chunks.heading, search_chunks.body, search_chunks.tags, search_chunks.created_at FROM search_chunks JOIN search_chunks_fts ON search_chunks_fts.rowid = search_chunks.rowid WHERE search_chunks_fts MATCH ? ORDER BY search_chunks.rowid",
+            "SELECT search_chunks.id, search_chunks.post_id, search_chunks.revision_id, search_chunks.chunk_index, search_chunks.title, search_chunks.heading, search_chunks.body, search_chunks.tags, search_chunks.created_at FROM search_chunks JOIN search_chunks_fts ON search_chunks_fts.rowid = search_chunks.rowid WHERE search_chunks_fts MATCH ? ORDER BY search_chunks_fts.rank LIMIT 20",
           )
           .bind(matchQuery)
           .all<SearchChunk>();
@@ -145,7 +153,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
         .replaceAll("_", "\\_");
       const result = await database
         .prepare(
-          "SELECT id, post_id, revision_id, chunk_index, title, heading, body, tags, created_at FROM search_chunks WHERE title LIKE '%' || ? || '%' ESCAPE '\\' OR heading LIKE '%' || ? || '%' ESCAPE '\\' OR body LIKE '%' || ? || '%' ESCAPE '\\' OR tags LIKE '%' || ? || '%' ESCAPE '\\' ORDER BY rowid",
+          "SELECT id, post_id, revision_id, chunk_index, title, heading, body, tags, created_at FROM search_chunks WHERE title LIKE '%' || ? || '%' ESCAPE '\\' OR heading LIKE '%' || ? || '%' ESCAPE '\\' OR body LIKE '%' || ? || '%' ESCAPE '\\' OR tags LIKE '%' || ? || '%' ESCAPE '\\' ORDER BY rowid LIMIT 20",
         )
         .bind(likeQuery, likeQuery, likeQuery, likeQuery)
         .all<SearchChunk>();

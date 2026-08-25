@@ -1,11 +1,59 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { createEditorialRepository } from "../src/repository";
+import {
+  createEditorialRepository,
+  MAX_SEARCH_QUERY_LENGTH,
+  RepositoryErrorCode,
+} from "../src/repository";
 
 const authorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f101";
 const postId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f102";
 const revisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f103";
 const chunkId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f104";
+
+const insertSearchParent = async (authorId: string, postId: string, revisionId: string) => {
+  await env.TEST_DB.prepare(
+    "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(authorId, `subject-${postId}`, "Search Author", 1_700_000_000_100, 1_700_000_000_100)
+    .run();
+  await env.TEST_DB.prepare(
+    "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(postId, `search-${postId}`, authorId, 1_700_000_000_100, 1_700_000_000_100)
+    .run();
+  await env.TEST_DB.prepare(
+    "INSERT INTO post_revisions (id, post_id, version, title, content_version, content_json, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+    .bind(revisionId, postId, 1, "Search fixture", 1, '{"type":"doc"}', authorId, 1_700_000_000_100)
+    .run();
+};
+
+const insertSearchChunk = async ({
+  id,
+  postId,
+  revisionId,
+  index,
+  title,
+  heading = "Search fixture",
+  body = "",
+  tags = "",
+}: {
+  id: string;
+  postId: string;
+  revisionId: string;
+  index: number;
+  title: string;
+  heading?: string;
+  body?: string;
+  tags?: string;
+}) => {
+  await env.TEST_DB.prepare(
+    "INSERT INTO search_chunks (id, post_id, revision_id, chunk_index, title, heading, body, tags, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+    .bind(id, postId, revisionId, index, title, heading, body, tags, 1_700_000_000_100 + index)
+    .run();
+};
 
 describe("search chunk FTS synchronization", () => {
   it("indexes, updates, and removes representative search chunks", async () => {
@@ -122,5 +170,95 @@ describe("search chunk FTS synchronization", () => {
     await expect(repository.searchChunks("日本語")).resolves.toMatchObject([{ id: chunkId }]);
     await expect(repository.searchChunks("東京")).resolves.toMatchObject([{ id: chunkId }]);
     await expect(repository.searchChunks("D1Database")).resolves.toMatchObject([{ id: chunkId }]);
+  });
+
+  it("orders FTS matches by relevance instead of insertion order", async () => {
+    const authorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f301";
+    const postId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f302";
+    const revisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f303";
+    const earlierChunkId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f304";
+    const moreRelevantChunkId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f305";
+
+    await insertSearchParent(authorId, postId, revisionId);
+    await insertSearchChunk({
+      id: earlierChunkId,
+      postId,
+      revisionId,
+      index: 0,
+      title: "Borealis",
+    });
+    await insertSearchChunk({
+      id: moreRelevantChunkId,
+      postId,
+      revisionId,
+      index: 1,
+      title: "Borealis Borealis Borealis",
+      body: "Borealis Borealis",
+    });
+
+    const repository = createEditorialRepository(env.TEST_DB);
+    await expect(repository.searchChunks("Borealis")).resolves.toMatchObject([
+      { id: moreRelevantChunkId },
+      { id: earlierChunkId },
+    ]);
+  });
+
+  it("limits trigram search results to twenty rows", async () => {
+    const authorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f401";
+    const postId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f402";
+    const revisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f403";
+
+    await insertSearchParent(authorId, postId, revisionId);
+    await Promise.all(
+      Array.from({ length: 25 }, (_, index) => {
+        const suffix = (0x404 + index).toString(16).padStart(4, "0");
+        return insertSearchChunk({
+          id: `018f0e5d-6a25-7b01-8f4a-7d62a5d3${suffix}`,
+          postId,
+          revisionId,
+          index,
+          title: "Aurora",
+        });
+      }),
+    );
+
+    const repository = createEditorialRepository(env.TEST_DB);
+    await expect(repository.searchChunks("Aurora")).resolves.toHaveLength(20);
+  });
+
+  it("limits short-query fallback results to twenty rows in row order", async () => {
+    const authorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f501";
+    const postId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f502";
+    const revisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3f503";
+    const matchingChunkIds: string[] = [];
+
+    await insertSearchParent(authorId, postId, revisionId);
+    for (let index = 0; index < 25; index += 1) {
+      const suffix = (0x504 + index).toString(16).padStart(4, "0");
+      const id = `018f0e5d-6a25-7b01-8f4a-7d62a5d3${suffix}`;
+      matchingChunkIds.push(id);
+      await insertSearchChunk({
+        id,
+        postId,
+        revisionId,
+        index,
+        title: "Qx",
+      });
+    }
+
+    const repository = createEditorialRepository(env.TEST_DB);
+    const results = await repository.searchChunks("Qx");
+    expect(results).toHaveLength(20);
+    expect(results.map(({ id }) => id)).toEqual(matchingChunkIds.slice(0, 20));
+  });
+
+  it("accepts the maximum query length and rejects longer queries", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const maximumQuery = "unlikely-query-term-".repeat(20).slice(0, MAX_SEARCH_QUERY_LENGTH);
+
+    await expect(repository.searchChunks(maximumQuery)).resolves.toEqual([]);
+    await expect(repository.searchChunks(`${maximumQuery}x`)).rejects.toMatchObject({
+      code: RepositoryErrorCode.READ_FAILED,
+    });
   });
 });

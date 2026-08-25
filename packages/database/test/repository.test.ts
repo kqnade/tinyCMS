@@ -2,6 +2,40 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { createEditorialRepository, RepositoryError, RepositoryErrorCode } from "../src/repository";
 
+const databaseThatRejectsPostCommitSelects = (database: D1Database): D1Database => {
+  let batchCompleted = false;
+  return new Proxy(database, {
+    get(target, property, receiver) {
+      if (property === "batch") {
+        return (statements: Parameters<D1Database["batch"]>[0]) =>
+          database.batch(statements).then((result) => {
+            batchCompleted = true;
+            return result;
+          });
+      }
+      if (property === "prepare") {
+        return (query: string) => {
+          if (batchCompleted && /^\s*SELECT/i.test(query)) {
+            throw new Error("post-commit reads are unavailable");
+          }
+          return database.prepare(query);
+        };
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+};
+
+const databaseThatRejectsBatches = (database: D1Database): D1Database =>
+  new Proxy(database, {
+    get(target, property, receiver) {
+      if (property === "batch") {
+        return () => Promise.reject(new Error("batch read failed"));
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+
 describe("editorial repository", () => {
   it("creates and reads an author, draft post, and initial revision", async () => {
     const repository = createEditorialRepository(env.TEST_DB);
@@ -74,6 +108,39 @@ describe("editorial repository", () => {
     await expect(repository.getRevision(input.revision.id)).resolves.toEqual(created.revision);
   });
 
+  it("returns created rows without post-commit readbacks", async () => {
+    const repository = createEditorialRepository(databaseThatRejectsPostCommitSelects(env.TEST_DB));
+    const created = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f601",
+        accessSubject: "subject-repository-batched-readback",
+        displayName: "Batch Author",
+        createdAt: 1_700_000_000_050,
+        updatedAt: 1_700_000_000_050,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f602",
+        slug: "repository-batched-readback",
+        createdAt: 1_700_000_000_051,
+        updatedAt: 1_700_000_000_051,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f603",
+        version: 1,
+        title: "Batched readback",
+        contentVersion: 1,
+        contentJson: '{"type":"doc"}',
+        createdAt: 1_700_000_000_052,
+      },
+    });
+
+    expect(created).toMatchObject({
+      author: { id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f601" },
+      post: { id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f602" },
+      revision: { id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f603" },
+    });
+  });
+
   it("rolls back the author and post when the final revision statement fails", async () => {
     const repository = createEditorialRepository(env.TEST_DB);
     const input = {
@@ -138,6 +205,46 @@ describe("editorial repository", () => {
     await expect(
       repository.getRevision("018f0e5d-6a25-7b01-8f4a-7d62a5d3e423"),
     ).rejects.toMatchObject({ code: RepositoryErrorCode.NOT_FOUND });
+  });
+
+  it("reports a missing post aggregate with a stable not-found error", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+
+    await expect(
+      repository.getPostAggregate("018f0e5d-6a25-7b01-8f4a-7d62a5d3f431"),
+    ).rejects.toMatchObject({ code: RepositoryErrorCode.NOT_FOUND });
+  });
+
+  it("maps an aggregate batch read failure to READ_FAILED", async () => {
+    const sourceRepository = createEditorialRepository(env.TEST_DB);
+    const created = await sourceRepository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f701",
+        accessSubject: "subject-repository-aggregate-failure",
+        displayName: "Aggregate Failure",
+        createdAt: 1_700_000_000_060,
+        updatedAt: 1_700_000_000_060,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f702",
+        slug: "repository-aggregate-failure",
+        createdAt: 1_700_000_000_061,
+        updatedAt: 1_700_000_000_061,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3f703",
+        version: 1,
+        title: "Aggregate failure",
+        contentVersion: 1,
+        contentJson: '{"type":"doc"}',
+        createdAt: 1_700_000_000_062,
+      },
+    });
+
+    const repository = createEditorialRepository(databaseThatRejectsBatches(env.TEST_DB));
+    await expect(repository.getPostAggregate(created.post.id)).rejects.toMatchObject({
+      code: RepositoryErrorCode.READ_FAILED,
+    });
   });
 
   it("reads a post by slug and keeps its aggregate revisions scoped to that post", async () => {
