@@ -59,6 +59,13 @@ export interface CreateRevisionInput {
   createdAt: number;
 }
 
+export interface AppendRevisionInput {
+  postId: string;
+  authorId: string;
+  expectedVersion: number;
+  revision: Omit<CreateRevisionInput, "version">;
+}
+
 export interface CreateAuthorPostRevisionInput {
   author: CreateAuthorInput;
   post: CreatePostInput;
@@ -80,6 +87,7 @@ export interface EditorialRepository {
   createAuthorPostRevision(
     input: CreateAuthorPostRevisionInput,
   ): Promise<CreatedAuthorPostRevision>;
+  appendRevision(input: AppendRevisionInput): Promise<PostRevision>;
   getAuthor(id: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
@@ -283,8 +291,59 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     }
   };
 
+  const appendRevision = async ({
+    postId,
+    authorId,
+    expectedVersion,
+    revision,
+  }: AppendRevisionInput): Promise<PostRevision> => {
+    try {
+      const result = await database
+        .prepare(
+          `INSERT INTO post_revisions (
+             id, post_id, version, title, content_version, content_json,
+             excerpt, metadata_json, author_id, created_at
+           )
+           SELECT ?, ?, MAX(version) + 1, ?, ?, ?, ?, ?, ?, ?
+           FROM post_revisions
+           WHERE post_id = ?
+           HAVING MAX(version) = ?
+           RETURNING id, post_id AS "postId", version, title,
+             content_version AS "contentVersion", content_json AS "contentJson",
+             excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+             created_at AS "createdAt"`,
+        )
+        .bind(
+          revision.id,
+          postId,
+          revision.title,
+          revision.contentVersion,
+          revision.contentJson,
+          revision.excerpt ?? null,
+          revision.metadataJson ?? "{}",
+          authorId,
+          revision.createdAt,
+          postId,
+          expectedVersion,
+        )
+        .all<PostRevision>();
+      const appendedRevision = result.results[0];
+      if (appendedRevision === undefined) {
+        throw new Error("Append statement returned no rows");
+      }
+      return appendedRevision;
+    } catch (cause) {
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to append post revision",
+        cause,
+      );
+    }
+  };
+
   return {
     createAuthorPostRevision,
+    appendRevision,
     getAuthor,
     getPost,
     getPostBySlug,

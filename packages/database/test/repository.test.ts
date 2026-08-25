@@ -108,6 +108,118 @@ describe("editorial repository", () => {
     await expect(repository.getRevision(input.revision.id)).resolves.toEqual(created.revision);
   });
 
+  it("appends sequential immutable revisions", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e601",
+        accessSubject: "subject-repository-append-initial",
+        displayName: "Initial Author",
+        createdAt: 1_700_000_000_100,
+        updatedAt: 1_700_000_000_100,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e602",
+        slug: "repository-append-sequential",
+        createdAt: 1_700_000_000_101,
+        updatedAt: 1_700_000_000_101,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e603",
+        version: 1,
+        title: "Initial snapshot",
+        contentVersion: 2,
+        contentJson: '{"type":"doc","children":[{"text":"initial"}]}',
+        excerpt: "Initial excerpt",
+        metadataJson: '{"template":"article","stage":"initial"}',
+        createdAt: 1_700_000_000_102,
+      },
+    });
+
+    const secondAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e604";
+    const thirdAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e605";
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        secondAuthorId,
+        "subject-repository-append-second",
+        "Second Author",
+        1_700_000_000_103,
+        1_700_000_000_103,
+      )
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        thirdAuthorId,
+        "subject-repository-append-third",
+        "Third Author",
+        1_700_000_000_104,
+        1_700_000_000_104,
+      )
+      .run();
+
+    const second = await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: secondAuthorId,
+      expectedVersion: 1,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e606",
+        title: "Second snapshot",
+        contentVersion: 7,
+        contentJson: '{"type":"doc","children":[{"text":"second"}]}',
+        excerpt: "Second excerpt",
+        metadataJson: '{"template":"article","stage":"second"}',
+        createdAt: 1_700_000_000_105,
+      },
+    });
+    const third = await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: thirdAuthorId,
+      expectedVersion: 2,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e607",
+        title: "Third snapshot",
+        contentVersion: 11,
+        contentJson: '{"type":"doc","children":[{"text":"third"}]}',
+        excerpt: "Third excerpt",
+        metadataJson: '{"template":"article","stage":"third"}',
+        createdAt: 1_700_000_000_106,
+      },
+    });
+
+    expect(second).toMatchObject({
+      id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e606",
+      postId: initial.post.id,
+      version: 2,
+      title: "Second snapshot",
+      contentVersion: 7,
+      contentJson: '{"type":"doc","children":[{"text":"second"}]}',
+      excerpt: "Second excerpt",
+      metadataJson: '{"template":"article","stage":"second"}',
+      authorId: secondAuthorId,
+      createdAt: 1_700_000_000_105,
+    });
+    expect(third).toMatchObject({
+      id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e607",
+      postId: initial.post.id,
+      version: 3,
+      title: "Third snapshot",
+      contentVersion: 11,
+      contentJson: '{"type":"doc","children":[{"text":"third"}]}',
+      excerpt: "Third excerpt",
+      metadataJson: '{"template":"article","stage":"third"}',
+      authorId: thirdAuthorId,
+      createdAt: 1_700_000_000_106,
+    });
+
+    const aggregate = await repository.getPostAggregate(initial.post.id);
+    expect(aggregate.revisions.map((revision) => revision.version)).toEqual([1, 2, 3]);
+    expect(aggregate.revisions[0]).toEqual(initial.revision);
+  });
+
   it("returns created rows without post-commit readbacks", async () => {
     const repository = createEditorialRepository(databaseThatRejectsPostCommitSelects(env.TEST_DB));
     const created = await repository.createAuthorPostRevision({
