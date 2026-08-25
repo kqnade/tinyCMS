@@ -167,8 +167,19 @@ describe("search chunk FTS synchronization", () => {
       .run();
 
     const repository = createEditorialRepository(env.TEST_DB);
-    await expect(repository.searchChunks("日本語")).resolves.toMatchObject([{ id: chunkId }]);
-    await expect(repository.searchChunks("東京")).resolves.toMatchObject([{ id: chunkId }]);
+    const expectedChunk = {
+      id: chunkId,
+      postId,
+      revisionId,
+      chunkIndex: 0,
+      title: "日本語の記事",
+      heading: "東京の案内",
+      body: "Cloudflare Workers with D1Database",
+      tags: "technical",
+      createdAt: 1_700_000_000_010,
+    };
+    await expect(repository.searchChunks("日本語")).resolves.toEqual([expectedChunk]);
+    await expect(repository.searchChunks("東京")).resolves.toEqual([expectedChunk]);
     await expect(repository.searchChunks("D1Database")).resolves.toMatchObject([{ id: chunkId }]);
   });
 

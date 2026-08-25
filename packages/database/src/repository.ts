@@ -140,7 +140,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
         const matchQuery = `"${normalized.replaceAll('"', '""')}"`;
         const result = await database
           .prepare(
-            "SELECT search_chunks.id, search_chunks.post_id, search_chunks.revision_id, search_chunks.chunk_index, search_chunks.title, search_chunks.heading, search_chunks.body, search_chunks.tags, search_chunks.created_at FROM search_chunks JOIN search_chunks_fts ON search_chunks_fts.rowid = search_chunks.rowid WHERE search_chunks_fts MATCH ? ORDER BY search_chunks_fts.rank LIMIT 20",
+            'SELECT search_chunks.id, search_chunks.post_id AS "postId", search_chunks.revision_id AS "revisionId", search_chunks.chunk_index AS "chunkIndex", search_chunks.title, search_chunks.heading, search_chunks.body, search_chunks.tags, search_chunks.created_at AS "createdAt" FROM search_chunks JOIN search_chunks_fts ON search_chunks_fts.rowid = search_chunks.rowid WHERE search_chunks_fts MATCH ? ORDER BY search_chunks_fts.rank LIMIT 20',
           )
           .bind(matchQuery)
           .all<SearchChunk>();
@@ -153,7 +153,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
         .replaceAll("_", "\\_");
       const result = await database
         .prepare(
-          "SELECT id, post_id, revision_id, chunk_index, title, heading, body, tags, created_at FROM search_chunks WHERE title LIKE '%' || ? || '%' ESCAPE '\\' OR heading LIKE '%' || ? || '%' ESCAPE '\\' OR body LIKE '%' || ? || '%' ESCAPE '\\' OR tags LIKE '%' || ? || '%' ESCAPE '\\' ORDER BY rowid LIMIT 20",
+          `SELECT id, post_id AS "postId", revision_id AS "revisionId", chunk_index AS "chunkIndex", title, heading, body, tags, created_at AS "createdAt" FROM search_chunks WHERE title LIKE '%' || ? || '%' ESCAPE '\\' OR heading LIKE '%' || ? || '%' ESCAPE '\\' OR body LIKE '%' || ? || '%' ESCAPE '\\' OR tags LIKE '%' || ? || '%' ESCAPE '\\' ORDER BY rowid LIMIT 20`,
         )
         .bind(likeQuery, likeQuery, likeQuery, likeQuery)
         .all<SearchChunk>();

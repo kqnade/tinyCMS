@@ -86,6 +86,7 @@ describe("editorial D1 constraints", () => {
   it("rejects invalid booleans, timestamps, and structured JSON", async () => {
     const checkAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3c201";
     const checkPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3c202";
+    const jsonPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3c205";
     await env.TEST_DB.prepare(
       "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     )
@@ -106,6 +107,17 @@ describe("editorial D1 constraints", () => {
         )
         .run(),
     ).rejects.toThrow();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        jsonPostId,
+        "structured-json-check",
+        checkAuthorId,
+        1_700_000_000_000,
+        1_700_000_000_000,
+      )
+      .run();
     await expect(
       env.TEST_DB.prepare(
         "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -125,7 +137,7 @@ describe("editorial D1 constraints", () => {
       )
         .bind(
           "018f0e5d-6a25-7b01-8f4a-7d62a5d3c204",
-          checkPostId,
+          jsonPostId,
           1,
           "Invalid JSON",
           1,
