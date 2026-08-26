@@ -94,6 +94,18 @@ importers:
         specifier: 30.0.1
         version: 30.0.1
 
+  packages/application:
+    dependencies:
+      '@tinycms/content':
+        specifier: workspace:*
+        version: link:../content
+      '@tinycms/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@tinycms/database':
+        specifier: workspace:*
+        version: link:../database
+
   packages/content:
     devDependencies:
       '@types/commonmark':
