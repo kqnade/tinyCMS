@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import type { HonoJsonWebKey } from "hono/utils/jwt/jws";
 import { sign } from "hono/utils/jwt/jwt";
 import { describe, expect, it } from "vitest";
+import { createEditorialApi, isEditorialConflict } from "../../studio/src/editorial-api";
 import { app, createAdminApp } from "../src/index";
 
 const ACCESS_DOMAIN = "team.cloudflareaccess.com";
@@ -985,6 +986,151 @@ describe("admin worker", () => {
     };
     expect(fallbackSecondBody.data.slug).toBe(`post-${fallbackSecondBody.data.id}`);
     expect(fallbackSecondBody.data.slug).not.toBe(fallbackFirstBody.data.slug);
+  });
+
+  it("round trips editorial workflows through the typed editorial client", async () => {
+    const key = await createSigningKey("editorial-client-key");
+    const assertion = await key.sign({
+      iss: ACCESS_ISSUER,
+      aud: ACCESS_AUDIENCE,
+      exp: NOW / 1000 + 300,
+      sub: "editorial-author-subject",
+      email: "author@example.test",
+    });
+    const ids = [
+      "0194b2f5-8e9b-7a34-8f99-111111111111",
+      "0194b2f5-8e9b-7a34-8f99-222222222222",
+      "0194b2f5-8e9b-7a34-8f99-333333333333",
+      "0194b2f5-8e9b-7a34-8f99-444444444444",
+      "0194b2f5-8e9b-7a34-8f99-555555555555",
+      "0194b2f5-8e9b-7a34-8f99-666666666666",
+      "0194b2f5-8e9b-7a34-8f99-777777777777",
+      "0194b2f5-8e9b-7a34-8f99-888888888888",
+      "0194b2f5-8e9b-7a34-8f99-999999999999",
+      "0194b2f5-8e9b-7a34-8f99-aaaaaaaaaaaa",
+    ];
+    const application = createAdminApp({
+      now: () => NOW,
+      uuidv7: () => {
+        const id = ids.shift();
+        if (id === undefined) {
+          throw new Error("test UUID sequence exhausted");
+        }
+        return id;
+      },
+      fetch: async () => new Response(JSON.stringify({ keys: [key.publicKey] }), { status: 200 }),
+    });
+    const api = createEditorialApi({
+      fetcher: async (path, init = {}) => {
+        const resolved =
+          typeof path === "string" && !/^https?:\/\//.test(path)
+            ? `https://localhost${path}`
+            : String(path);
+        const headers = new Headers(init.headers);
+        headers.set("Cf-Access-Jwt-Assertion", assertion);
+        if (init.body !== undefined && init.body !== null) {
+          headers.set("Origin", "https://localhost");
+        }
+        return application.request(resolved, { ...init, headers }, DB_BINDINGS);
+      },
+    });
+    const document = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Editorial client test" }] }],
+    };
+
+    const beforePosts = await api.listPosts();
+
+    const created = await api.createPost({
+      title: "Client post",
+      contentVersion: 1,
+      content: document,
+    });
+    expect(created.slug).toBe("client-post");
+    expect(created.draftVersion).toBe(1);
+    expect(created.currentRevisionVersion).toBe(1);
+
+    const loaded = await api.getPost(created.id);
+    expect(loaded.id).toBe(created.id);
+    expect(loaded.title).toBe("Client post");
+    expect(loaded.currentRevisionVersion).toBe(created.currentRevisionVersion);
+
+    const updated = await api.saveDraft(created.id, {
+      expectedDraftVersion: created.draftVersion,
+      title: "Client post updated",
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Saved content" }] }],
+      },
+    });
+    expect(updated.draftVersion).toBe(2);
+    expect(updated.title).toBe("Client post updated");
+    expect(updated.currentRevisionVersion).toBe(1);
+
+    await expect(
+      api.saveDraft(created.id, {
+        expectedDraftVersion: created.draftVersion,
+        title: "Stale save",
+        contentVersion: 1,
+        content: document,
+      }),
+    ).rejects.toSatisfy(isEditorialConflict);
+
+    const revisionsAfterDraft = await api.listRevisions(created.id, { limit: 2 });
+    expect(revisionsAfterDraft.items).toHaveLength(1);
+    expect(revisionsAfterDraft.items[0]?.revisionVersion).toBe(1);
+
+    const draftState = await env.CMS_DB.prepare(
+      "SELECT version, title FROM post_drafts WHERE post_id = ?",
+    )
+      .bind(created.id)
+      .first<{ version: number; title: string }>();
+    expect(draftState).toMatchObject({ version: 2, title: "Client post updated" });
+    const revisionState = await env.CMS_DB.prepare(
+      "SELECT version FROM post_revisions WHERE post_id = ? ORDER BY version",
+    )
+      .bind(created.id)
+      .all<{ version: number }>();
+    expect(revisionState.results).toEqual([{ version: 1 }]);
+
+    const checkpointed = await api.checkpointRevision(created.id, {
+      expectedDraftVersion: updated.draftVersion,
+      expectedRevisionVersion:
+        updated.currentRevisionVersion ??
+        (() => {
+          throw new Error("Expected currentRevisionVersion to be present");
+        })(),
+    });
+    expect(checkpointed.revision.revisionVersion).toBe(2);
+    expect(checkpointed.post.currentRevisionVersion).toBe(2);
+    expect(checkpointed.post.draftVersion).toBe(2);
+
+    const revisionsAfterCheckpoint = await api.listRevisions(created.id, { limit: 2 });
+    expect(revisionsAfterCheckpoint.items).toHaveLength(2);
+    expect(revisionsAfterCheckpoint.items[0]?.revisionVersion).toBe(2);
+    expect(revisionsAfterCheckpoint.items[1]?.revisionVersion).toBe(1);
+
+    const restoreTargetRevision = revisionsAfterCheckpoint.items[1];
+    if (restoreTargetRevision === undefined) {
+      throw new Error("Expected a revision to restore");
+    }
+
+    const restored = await api.restoreRevision(created.id, restoreTargetRevision.id, {
+      expectedDraftVersion: checkpointed.post.draftVersion,
+      expectedRevisionVersion: checkpointed.revision.revisionVersion,
+    });
+    expect(restored.post.draftVersion).toBe(3);
+    expect(restored.revision.revisionVersion).toBeGreaterThan(
+      checkpointed.revision.revisionVersion,
+    );
+    expect(restored.post.title).toBe("Client post");
+
+    const final = await api.getPost(created.id);
+    expect(final.title).toBe("Client post");
+    expect(final.draftVersion).toBe(3);
+    const afterPosts = await api.listPosts();
+    expect(afterPosts.items.length).toBe(beforePosts.items.length + 1);
   });
 
   it("rejects each invalid browser write boundary before D1", async () => {

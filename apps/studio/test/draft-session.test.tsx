@@ -8,6 +8,7 @@ import { App } from "../src/App";
 import {
   type DraftSaveRequest,
   type DraftSessionOptions,
+  type DraftSnapshot,
   useDraftSession,
 } from "../src/draft-session";
 import { createEditorContent, createEmptyEditorContent } from "../src/editor-content";
@@ -75,6 +76,21 @@ function DraftSessionProbe(options: DraftSessionOptions) {
       <button type="button" onClick={() => void session.save()}>
         Save draft
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          session.hydrate({
+            content: createEditorContent({
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Remote body" }] }],
+            }),
+            draftVersion: 7,
+            title: "Remote title",
+          } satisfies DraftSnapshot)
+        }
+      >
+        Hydrate session
+      </button>
       <output aria-label="Session title">{session.title}</output>
       <output aria-label="Session body">
         {session.content.content.content[0]?.content?.[0]?.text}
@@ -85,6 +101,44 @@ function DraftSessionProbe(options: DraftSessionOptions) {
 }
 
 describe("draft session", () => {
+  it("hydrates a remote snapshot without changing the save state to dirty", async () => {
+    render(<DraftSessionProbe />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Update title" }));
+    const localSnapshot = screen.getByRole("status", { name: "Session title" });
+    expect(localSnapshot.textContent).toBe("Updated title");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate session" }));
+
+    expect(screen.getByRole("status", { name: "Session title" }).textContent).toBe("Remote title");
+    expect(screen.getByRole("status", { name: "Session body" }).textContent).toBe("Remote body");
+    expect(screen.getByRole("status", { name: "Session status" }).textContent).toBe("saved");
+  });
+
+  it("keeps a new save pending when an older request resolves after hydration", async () => {
+    const resolvers: Array<(result: { draftVersion: number; ok: true }) => void> = [];
+    const saveDraft = vi.fn(
+      (_request: DraftSaveRequest) =>
+        new Promise<{ draftVersion: number; ok: true }>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    render(<DraftSessionProbe persistence={{ saveDraft }} autosaveDelay={0} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Update title" }));
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update title" }));
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledTimes(2));
+
+    resolvers[0]?.({ draftVersion: 2, ok: true });
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "Session status" }).textContent).toBe("saving"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(saveDraft).toHaveBeenCalledTimes(2);
+  });
+
   it("autosaves a dirty title with the canonical content and advances the draft version", async () => {
     const saveDraft = vi.fn(
       async (
