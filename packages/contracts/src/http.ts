@@ -10,6 +10,7 @@ export type ErrorResponse = {
     code: string;
     message: string;
     requestId: string;
+    details?: unknown;
   };
 };
 
@@ -20,7 +21,18 @@ export function successResponse<T>(data: T, requestId: string): SuccessResponse<
   };
 }
 
-export function errorResponse(code: string, message: string, requestId: string): ErrorResponse {
+export function errorResponse(
+  code: string,
+  message: string,
+  requestId: string,
+  details?: unknown,
+): ErrorResponse {
+  if (details !== undefined) {
+    return {
+      error: { code, message, requestId, details },
+    };
+  }
+
   return {
     error: { code, message, requestId },
   };
