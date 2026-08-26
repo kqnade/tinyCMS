@@ -5,11 +5,8 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
+import type { DraftSaveRequest } from "../src/draft-session";
 import { createEmptyEditorContent } from "../src/editor-content";
-
-type SaveDraftRequest = Parameters<
-  NonNullable<ComponentProps<typeof App>["persistence"]>["saveDraft"]
->[0];
 
 afterEach(() => {
   cleanup();
@@ -119,7 +116,7 @@ describe("draft session", () => {
     ["a conflict", { code: "CONFLICT" as const, ok: false as const }, "Conflict"],
     ["a returned error", { code: "ERROR" as const, ok: false as const }, "Error"],
   ])("preserves the draft after %s and leaves Save retryable", async (_label, result, status) => {
-    const saveDraft = vi.fn(async (_request: SaveDraftRequest) => result);
+    const saveDraft = vi.fn(async (_request: DraftSaveRequest) => result);
 
     render(
       <App
@@ -146,7 +143,7 @@ describe("draft session", () => {
   it("keeps a stale conflict explicit without retrying the stale version", async () => {
     let resolveSave: ((result: { ok: false; code: "CONFLICT" }) => void) | undefined;
     const saveDraft = vi.fn(
-      (_request: SaveDraftRequest) =>
+      (_request: DraftSaveRequest) =>
         new Promise<{ ok: false; code: "CONFLICT" }>((resolve) => {
           resolveSave = resolve;
         }),
@@ -168,7 +165,7 @@ describe("draft session", () => {
   });
 
   it("turns a thrown persistence failure into a retryable error", async () => {
-    const saveDraft = vi.fn(async (_request: SaveDraftRequest) => {
+    const saveDraft = vi.fn(async (_request: DraftSaveRequest) => {
       throw new Error("network unavailable");
     });
 
@@ -193,7 +190,7 @@ describe("draft session", () => {
   });
 
   it("does not accept an invalid successful version or add revision data", async () => {
-    const saveDraft = vi.fn(async (_request: SaveDraftRequest) => ({
+    const saveDraft = vi.fn(async (_request: DraftSaveRequest) => ({
       ok: true as const,
       draftVersion: 9,
     }));
@@ -213,7 +210,7 @@ describe("draft session", () => {
   it("flushes manually and autosaves edits made during the pending request", async () => {
     const resolvers: Array<(result: { ok: true; draftVersion: number }) => void> = [];
     const saveDraft = vi.fn(
-      (_request: SaveDraftRequest) =>
+      (_request: DraftSaveRequest) =>
         new Promise<{ ok: true; draftVersion: number }>((resolve) => {
           resolvers.push(resolve);
         }),
@@ -304,7 +301,7 @@ describe("draft session", () => {
   });
 
   it("debounces autosave from the latest edit", async () => {
-    const saveDraft = vi.fn(async (_request: SaveDraftRequest) => ({
+    const saveDraft = vi.fn(async (_request: DraftSaveRequest) => ({
       draftVersion: 2,
       ok: true as const,
     }));
@@ -324,7 +321,7 @@ describe("draft session", () => {
   it("reports an invalid version as an error even when a newer edit is pending", async () => {
     let resolveSave: ((result: { ok: true; draftVersion: number }) => void) | undefined;
     const saveDraft = vi.fn(
-      (_request: SaveDraftRequest) =>
+      (_request: DraftSaveRequest) =>
         new Promise<{ ok: true; draftVersion: number }>((resolve) => {
           resolveSave = resolve;
         }),
@@ -346,7 +343,7 @@ describe("draft session", () => {
 
   it("marks a body-only edit dirty and persists its canonical document", async () => {
     installJsdomGeometry();
-    const saveDraft = vi.fn(async (_request: SaveDraftRequest) => ({
+    const saveDraft = vi.fn(async (_request: DraftSaveRequest) => ({
       draftVersion: 2,
       ok: true as const,
     }));
