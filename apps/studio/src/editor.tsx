@@ -445,7 +445,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
   useEffect(() => {
     if (editableRef.current === editable) return;
     editableRef.current = editable;
-    editor?.setEditable(editable);
+    editor?.setEditable(editable, false);
   }, [editable, editor]);
 
   useImperativeHandle(

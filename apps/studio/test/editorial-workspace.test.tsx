@@ -246,6 +246,7 @@ describe("Studio editorial workspace", () => {
       expect(screen.getByRole("textbox", { name: "Body" }).getAttribute("contenteditable")).toBe(
         "true",
       );
+      expect(screen.getByRole("status", { name: "Saved" })).toBeTruthy();
     });
   });
 
