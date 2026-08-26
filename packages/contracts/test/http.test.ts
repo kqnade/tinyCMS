@@ -18,4 +18,19 @@ describe("HTTP response contracts", () => {
       },
     });
   });
+
+  it("includes optional error details when provided", () => {
+    expect(
+      errorResponse("INVALID_REQUEST", "Invalid request", "request-789", {
+        field: "title",
+      }),
+    ).toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        requestId: "request-789",
+        details: { field: "title" },
+      },
+    });
+  });
 });
