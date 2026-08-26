@@ -299,6 +299,9 @@ describe("editorial repository drafts", () => {
       authorId: initial.author.id,
       createdAt: 1_700_000_010_404,
     });
+    await expect(repository.getPost(initial.post.id)).resolves.toMatchObject({
+      updatedAt: 1_700_000_010_404,
+    });
     await expect(repository.getDraft(initial.post.id)).resolves.toEqual(draftBeforeFirstCheckpoint);
 
     const secondDraft = await repository.saveDraft({
@@ -335,6 +338,9 @@ describe("editorial repository drafts", () => {
       metadataJson: secondDraft.metadataJson,
       authorId: initial.author.id,
       createdAt: 1_700_000_010_406,
+    });
+    await expect(repository.getPost(initial.post.id)).resolves.toMatchObject({
+      updatedAt: 1_700_000_010_406,
     });
     await expect(repository.getDraft(initial.post.id)).resolves.toEqual(
       draftBeforeSecondCheckpoint,
@@ -488,6 +494,112 @@ describe("editorial repository drafts", () => {
     ).rejects.toMatchObject({
       code: RepositoryErrorCode.NOT_FOUND,
       message: "post draft was not found",
+    });
+  });
+
+  it("preserves an existing post when its checkpoint draft was deleted", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc41",
+        accessSubject: "subject-draft-checkpoint-deleted-draft",
+        displayName: "Deleted Checkpoint Draft Author",
+        createdAt: 1_700_000_010_340,
+        updatedAt: 1_700_000_010_340,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc42",
+        slug: "draft-checkpoint-deleted-draft",
+        createdAt: 1_700_000_010_341,
+        updatedAt: 1_700_000_010_341,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc43",
+        version: 1,
+        title: "Deleted checkpoint draft initial",
+        contentVersion: 1,
+        contentJson,
+        createdAt: 1_700_000_010_342,
+      },
+    });
+    const beforePost = await repository.getPost(initial.post.id);
+    const beforeAggregate = await repository.getPostAggregate(initial.post.id);
+    await env.TEST_DB.prepare("DELETE FROM post_drafts WHERE post_id = ?")
+      .bind(initial.post.id)
+      .run();
+
+    await expect(
+      repository.checkpointDraft({
+        postId: initial.post.id,
+        expectedDraftVersion: 1,
+        expectedRevisionVersion: initial.revision.version,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc44",
+        authorId: initial.author.id,
+        createdAt: 1_700_000_010_343,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+      message: "post draft was not found",
+    });
+    await expect(repository.getPost(initial.post.id)).resolves.toEqual(beforePost);
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(beforeAggregate);
+  });
+
+  it("rolls back the post timestamp when checkpointing the revision fails", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc51",
+        accessSubject: "subject-draft-checkpoint-rollback",
+        displayName: "Checkpoint Rollback Author",
+        createdAt: 1_700_000_010_350,
+        updatedAt: 1_700_000_010_350,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc52",
+        slug: "draft-checkpoint-rollback",
+        createdAt: 1_700_000_010_351,
+        updatedAt: 1_700_000_010_351,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc53",
+        version: 1,
+        title: "Checkpoint rollback initial",
+        contentVersion: 1,
+        contentJson,
+        createdAt: 1_700_000_010_352,
+      },
+    });
+    const beforePost = await repository.getPost(initial.post.id);
+    const beforeDraft = await repository.getDraft(initial.post.id);
+    const beforeAggregate = await repository.getPostAggregate(initial.post.id);
+    const failedRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc54";
+
+    let error: unknown;
+    try {
+      await repository.checkpointDraft({
+        postId: initial.post.id,
+        expectedDraftVersion: beforeDraft.version,
+        expectedRevisionVersion: initial.revision.version,
+        revisionId: failedRevisionId,
+        authorId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc55",
+        createdAt: 1_700_000_010_353,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({
+      code: RepositoryErrorCode.WRITE_FAILED,
+      message: "Failed to checkpoint post draft",
+    });
+    expect((error as RepositoryError).message).not.toMatch(/INSERT|post_revisions|SQL/i);
+    await expect(repository.getPost(initial.post.id)).resolves.toEqual(beforePost);
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(beforeDraft);
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(beforeAggregate);
+    await expect(repository.getRevision(failedRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
     });
   });
 

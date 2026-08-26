@@ -281,43 +281,69 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     createdAt,
   }: CheckpointDraftInput): Promise<PostRevision> => {
     try {
-      const result = await database
-        .prepare(
-          `INSERT INTO post_revisions (
-             id, post_id, version, title, content_version, content_json,
-             excerpt, metadata_json, author_id, created_at
-           )
-           SELECT ?, draft.post_id, current.version + 1, draft.title,
-             draft.content_version, draft.content_json, draft.excerpt,
-             draft.metadata_json, ?, ?
-           FROM post_drafts AS draft
-           JOIN (
-             SELECT post_id, MAX(version) AS version
-             FROM post_revisions
-             WHERE post_id = ?
-             GROUP BY post_id
-           ) AS current ON current.post_id = draft.post_id
-           WHERE draft.post_id = ?
-             AND draft.version = ?
-             AND current.version = ?
-           RETURNING id, post_id AS "postId", version, title,
-             content_version AS "contentVersion", content_json AS "contentJson",
-             excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
-             created_at AS "createdAt"`,
-        )
-        .bind(
-          revisionId,
-          authorId,
-          createdAt,
-          postId,
-          postId,
-          expectedDraftVersion,
-          expectedRevisionVersion,
-        )
-        .all<PostRevision>();
-      const checkpoint = result.results[0];
-      if (checkpoint !== undefined) {
+      const [postResult, revisionResult] = await database.batch([
+        database
+          .prepare(
+            `UPDATE posts
+             SET updated_at = ?
+             WHERE id = ?
+               AND EXISTS (
+                 SELECT 1
+                 FROM post_drafts AS draft
+                 JOIN (
+                   SELECT post_id, MAX(version) AS version
+                   FROM post_revisions
+                   WHERE post_id = ?
+                   GROUP BY post_id
+                 ) AS current ON current.post_id = draft.post_id
+                 WHERE draft.post_id = posts.id
+                   AND draft.version = ?
+                   AND current.version = ?
+               )`,
+          )
+          .bind(createdAt, postId, postId, expectedDraftVersion, expectedRevisionVersion),
+        database
+          .prepare(
+            `INSERT INTO post_revisions (
+               id, post_id, version, title, content_version, content_json,
+               excerpt, metadata_json, author_id, created_at
+             )
+             SELECT ?, draft.post_id, current.version + 1, draft.title,
+               draft.content_version, draft.content_json, draft.excerpt,
+               draft.metadata_json, ?, ?
+             FROM post_drafts AS draft
+             JOIN (
+               SELECT post_id, MAX(version) AS version
+               FROM post_revisions
+               WHERE post_id = ?
+               GROUP BY post_id
+             ) AS current ON current.post_id = draft.post_id
+             WHERE draft.post_id = ?
+               AND draft.version = ?
+               AND current.version = ?
+             RETURNING id, post_id AS "postId", version, title,
+               content_version AS "contentVersion", content_json AS "contentJson",
+               excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+               created_at AS "createdAt"`,
+          )
+          .bind(
+            revisionId,
+            authorId,
+            createdAt,
+            postId,
+            postId,
+            expectedDraftVersion,
+            expectedRevisionVersion,
+          ),
+      ]);
+      const checkpoint = revisionResult?.results[0] as PostRevision | undefined;
+      const postUpdated = postResult?.meta.changes === 1;
+      const revisionInserted = revisionResult?.meta.changes === 1;
+      if (postUpdated && revisionInserted && checkpoint !== undefined) {
         return checkpoint;
+      }
+      if (postUpdated || revisionInserted || checkpoint !== undefined) {
+        throw new Error("Draft checkpoint statements returned a partial result");
       }
 
       const draft = await database
