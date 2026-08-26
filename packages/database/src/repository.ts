@@ -115,6 +115,20 @@ export interface CreateAuthorPostRevisionInput {
   revision: CreateRevisionInput;
 }
 
+export type CreatePostWithAuthorInput = CreateAuthorPostRevisionInput;
+
+export interface PostListInput {
+  limit: number;
+  afterUpdatedAt?: number;
+  afterId?: string;
+}
+
+export interface RevisionListInput {
+  postId: string;
+  limit: number;
+  afterVersion?: number;
+}
+
 export interface CreatedAuthorPostRevision {
   author: Author;
   post: Post;
@@ -135,17 +149,23 @@ export interface EditorialRepository {
   createAuthorPostRevision(
     input: CreateAuthorPostRevisionInput,
   ): Promise<CreatedAuthorPostRevision>;
+  createPostWithAuthor(input: CreatePostWithAuthorInput): Promise<CreatedAuthorPostRevision>;
+  upsertAuthorByAccessSubject(input: CreateAuthorInput): Promise<Author>;
   appendRevision(input: AppendRevisionInput): Promise<PostRevision>;
   restoreRevision(input: RestoreRevisionInput): Promise<PostRevision>;
   restoreDraft(input: RestoreDraftInput): Promise<RestoredDraft>;
   saveDraft(input: SaveDraftInput): Promise<PostDraft>;
   checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
   getAuthor(id: string): Promise<Author>;
+  getAuthorByAccessSubject(accessSubject: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
   getRevision(id: string): Promise<PostRevision>;
+  getLatestRevisionVersion(postId: string): Promise<number | null>;
   getDraft(postId: string): Promise<PostDraft>;
   getPostAggregate(id: string): Promise<PostAggregate>;
+  listPosts(input: PostListInput): Promise<Post[]>;
+  listRevisions(input: RevisionListInput): Promise<PostRevision[]>;
   purgePost(id: string): Promise<void>;
   searchChunks(query: string): Promise<SearchChunk[]>;
 }
@@ -172,6 +192,47 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
   const getAuthor = (id: string): Promise<Author> =>
     readOne(db.select().from(authors).where(eq(authors.id, id)).limit(1), "author");
 
+  const getAuthorByAccessSubject = (accessSubject: string): Promise<Author> =>
+    readOne(
+      db.select().from(authors).where(eq(authors.accessSubject, accessSubject)).limit(1),
+      "author",
+    );
+
+  const upsertAuthorByAccessSubject = async (input: CreateAuthorInput): Promise<Author> => {
+    try {
+      const result = await database
+        .prepare(
+          `INSERT INTO authors (
+             id, access_subject, display_name, email, avatar_url, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(access_subject) DO UPDATE SET
+             display_name = excluded.display_name,
+             email = COALESCE(excluded.email, authors.email),
+             avatar_url = COALESCE(excluded.avatar_url, authors.avatar_url),
+             updated_at = excluded.updated_at
+           RETURNING id, access_subject AS "accessSubject", display_name AS "displayName",
+             email, avatar_url AS "avatarUrl", created_at AS "createdAt",
+             updated_at AS "updatedAt"`,
+        )
+        .bind(
+          input.id,
+          input.accessSubject,
+          input.displayName,
+          input.email ?? null,
+          input.avatarUrl ?? null,
+          input.createdAt,
+          input.updatedAt,
+        )
+        .first<Author>();
+      if (result === null) {
+        throw new Error("Author upsert returned no row");
+      }
+      return result;
+    } catch (cause) {
+      throw new RepositoryError(RepositoryErrorCode.WRITE_FAILED, "Failed to upsert author", cause);
+    }
+  };
+
   const getPost = (id: string): Promise<Post> =>
     readOne(db.select().from(posts).where(eq(posts.id, id)).limit(1), "post");
 
@@ -183,6 +244,22 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       db.select().from(postRevisions).where(eq(postRevisions.id, id)).limit(1),
       "post revision",
     );
+
+  const getLatestRevisionVersion = async (postId: string): Promise<number | null> => {
+    try {
+      const result = await database
+        .prepare("SELECT MAX(version) AS version FROM post_revisions WHERE post_id = ?")
+        .bind(postId)
+        .first<{ version: number | null }>();
+      return result?.version ?? null;
+    } catch (cause) {
+      throw new RepositoryError(
+        RepositoryErrorCode.READ_FAILED,
+        "Failed to read latest post revision version",
+        cause,
+      );
+    }
+  };
 
   const getDraft = (postId: string): Promise<PostDraft> =>
     readOne(
@@ -436,6 +513,83 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     }
   };
 
+  const listPosts = async ({ limit, afterUpdatedAt, afterId }: PostListInput): Promise<Post[]> => {
+    try {
+      const result =
+        afterUpdatedAt !== undefined && afterId !== undefined
+          ? await database
+              .prepare(
+                `SELECT id, slug, status, active_published_revision_id AS "activePublishedRevisionId",
+                   scheduled_at AS "scheduledAt", canonical_url AS "canonicalUrl", noindex,
+                   created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"
+                 FROM posts
+                 WHERE updated_at < ? OR (updated_at = ? AND id < ?)
+                 ORDER BY updated_at DESC, id DESC
+                 LIMIT ?`,
+              )
+              .bind(afterUpdatedAt, afterUpdatedAt, afterId, limit)
+              .all<Post>()
+          : await database
+              .prepare(
+                `SELECT id, slug, status, active_published_revision_id AS "activePublishedRevisionId",
+                   scheduled_at AS "scheduledAt", canonical_url AS "canonicalUrl", noindex,
+                   created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"
+                 FROM posts
+                 ORDER BY updated_at DESC, id DESC
+                 LIMIT ?`,
+              )
+              .bind(limit)
+              .all<Post>();
+      return result.results;
+    } catch (cause) {
+      throw new RepositoryError(RepositoryErrorCode.READ_FAILED, "Failed to list posts", cause);
+    }
+  };
+
+  const listRevisions = async ({
+    postId,
+    limit,
+    afterVersion,
+  }: RevisionListInput): Promise<PostRevision[]> => {
+    try {
+      const result =
+        afterVersion !== undefined
+          ? await database
+              .prepare(
+                `SELECT id, post_id AS "postId", version, title,
+                   content_version AS "contentVersion", content_json AS "contentJson",
+                   excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+                   created_at AS "createdAt"
+                 FROM post_revisions
+                 WHERE post_id = ? AND version < ?
+                 ORDER BY version DESC
+                 LIMIT ?`,
+              )
+              .bind(postId, afterVersion, limit)
+              .all<PostRevision>()
+          : await database
+              .prepare(
+                `SELECT id, post_id AS "postId", version, title,
+                   content_version AS "contentVersion", content_json AS "contentJson",
+                   excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+                   created_at AS "createdAt"
+                 FROM post_revisions
+                 WHERE post_id = ?
+                 ORDER BY version DESC
+                 LIMIT ?`,
+              )
+              .bind(postId, limit)
+              .all<PostRevision>();
+      return result.results;
+    } catch (cause) {
+      throw new RepositoryError(
+        RepositoryErrorCode.READ_FAILED,
+        "Failed to list post revisions",
+        cause,
+      );
+    }
+  };
+
   const purgePost = async (id: string): Promise<void> => {
     try {
       const results = await database.batch([
@@ -453,6 +607,134 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
         throw error;
       }
       throw new RepositoryError(RepositoryErrorCode.WRITE_FAILED, "Failed to purge post", error);
+    }
+  };
+
+  const createPostWithAuthor = async (
+    input: CreatePostWithAuthorInput,
+  ): Promise<CreatedAuthorPostRevision> => {
+    const { author, post, revision } = input;
+    try {
+      const [authorResult, postResult, revisionResult, draftResult] = await database.batch([
+        database
+          .prepare(
+            `INSERT INTO authors (
+               id, access_subject, display_name, email, avatar_url, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(access_subject) DO UPDATE SET
+               display_name = excluded.display_name,
+               email = COALESCE(excluded.email, authors.email),
+               avatar_url = COALESCE(excluded.avatar_url, authors.avatar_url),
+               updated_at = excluded.updated_at
+             RETURNING id, access_subject AS "accessSubject", display_name AS "displayName",
+               email, avatar_url AS "avatarUrl", created_at AS "createdAt",
+               updated_at AS "updatedAt"`,
+          )
+          .bind(
+            author.id,
+            author.accessSubject,
+            author.displayName,
+            author.email ?? null,
+            author.avatarUrl ?? null,
+            author.createdAt,
+            author.updatedAt,
+          ),
+        database
+          .prepare(
+            `INSERT INTO posts (
+               id, slug, status, active_published_revision_id, scheduled_at,
+               canonical_url, noindex, created_by, created_at, updated_at
+             )
+             SELECT ?, ?, 'draft', NULL, ?, ?, ?, id, ?, ?
+             FROM authors
+             WHERE access_subject = ?
+             RETURNING id, slug, status,
+               active_published_revision_id AS "activePublishedRevisionId",
+               scheduled_at AS "scheduledAt", canonical_url AS "canonicalUrl", noindex,
+               created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`,
+          )
+          .bind(
+            post.id,
+            post.slug,
+            post.scheduledAt ?? null,
+            post.canonicalUrl ?? null,
+            post.noindex ?? 0,
+            post.createdAt,
+            post.updatedAt,
+            author.accessSubject,
+          ),
+        database
+          .prepare(
+            `INSERT INTO post_revisions (
+               id, post_id, version, title, content_version, content_json,
+               excerpt, metadata_json, author_id, created_at
+             )
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, id, ?
+             FROM authors
+             WHERE access_subject = ?
+             RETURNING id, post_id AS "postId", version, title,
+               content_version AS "contentVersion", content_json AS "contentJson",
+               excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+               created_at AS "createdAt"`,
+          )
+          .bind(
+            revision.id,
+            post.id,
+            revision.version,
+            revision.title,
+            revision.contentVersion,
+            revision.contentJson,
+            revision.excerpt ?? null,
+            revision.metadataJson ?? "{}",
+            revision.createdAt,
+            author.accessSubject,
+          ),
+        database
+          .prepare(
+            `INSERT INTO post_drafts (
+               post_id, version, title, content_version, content_json,
+               excerpt, metadata_json, author_id, updated_at
+             )
+             SELECT ?, 1, ?, ?, ?, ?, ?, id, ?
+             FROM authors
+             WHERE access_subject = ?
+             RETURNING post_id AS "postId", version, title,
+               content_version AS "contentVersion", content_json AS "contentJson",
+               excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+               updated_at AS "updatedAt"`,
+          )
+          .bind(
+            post.id,
+            revision.title,
+            revision.contentVersion,
+            revision.contentJson,
+            revision.excerpt ?? null,
+            revision.metadataJson ?? "{}",
+            revision.createdAt,
+            author.accessSubject,
+          ),
+      ]);
+      const createdAuthor = authorResult?.results[0] as Author | undefined;
+      const createdPost = postResult?.results[0] as Post | undefined;
+      const createdRevision = revisionResult?.results[0] as PostRevision | undefined;
+      if (
+        createdAuthor === undefined ||
+        createdPost === undefined ||
+        createdRevision === undefined ||
+        draftResult?.results[0] === undefined
+      ) {
+        throw new Error("Create statements returned no rows");
+      }
+      return { author: createdAuthor, post: createdPost, revision: createdRevision };
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.includes("posts.slug")) {
+        throw new RepositoryError(RepositoryErrorCode.CONFLICT, "Post slug already exists");
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to create post with author",
+        cause,
+      );
     }
   };
 
@@ -854,17 +1136,23 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
 
   return {
     createAuthorPostRevision,
+    createPostWithAuthor,
+    upsertAuthorByAccessSubject,
     appendRevision,
     restoreRevision,
     restoreDraft,
     saveDraft,
     checkpointDraft,
     getAuthor,
+    getAuthorByAccessSubject,
     getPost,
     getPostBySlug,
     getRevision,
+    getLatestRevisionVersion,
     getDraft,
     getPostAggregate,
+    listPosts,
+    listRevisions,
     purgePost,
     searchChunks: searchChunksByQuery,
   };

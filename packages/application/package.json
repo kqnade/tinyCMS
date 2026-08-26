@@ -1,0 +1,18 @@
+{
+  "name": "@tinycms/application",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tinycms/content": "workspace:*",
+    "@tinycms/contracts": "workspace:*",
+    "@tinycms/database": "workspace:*"
+  }
+}
