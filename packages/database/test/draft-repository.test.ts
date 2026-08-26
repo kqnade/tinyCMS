@@ -230,6 +230,261 @@ describe("editorial repository drafts", () => {
     expect(aggregate.revisions).toEqual([initial.revision]);
   });
 
+  it("checkpoints the current draft as an immutable revision without changing the draft", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd01",
+        accessSubject: "subject-draft-checkpoint-success",
+        displayName: "Checkpoint Author",
+        createdAt: 1_700_000_010_400,
+        updatedAt: 1_700_000_010_400,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd02",
+        slug: "draft-checkpoint-success",
+        createdAt: 1_700_000_010_401,
+        updatedAt: 1_700_000_010_401,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd03",
+        version: 4,
+        title: "Initial snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc","content":[]}',
+        excerpt: "Initial excerpt",
+        metadataJson: '{"stage":"initial"}',
+        createdAt: 1_700_000_010_402,
+      },
+    });
+
+    const firstDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: 1,
+      authorId: initial.author.id,
+      title: "First checkpoint title",
+      contentVersion: 1,
+      contentJson:
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"First checkpoint"}]}]}',
+      excerpt: "First checkpoint excerpt",
+      metadataJson: '{"stage":"first-checkpoint"}',
+      updatedAt: 1_700_000_010_403,
+    });
+    const draftBeforeFirstCheckpoint = await repository.getDraft(initial.post.id);
+
+    const firstCheckpoint = await repository.checkpointDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: firstDraft.version,
+      expectedRevisionVersion: initial.revision.version,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd04",
+      authorId: initial.author.id,
+      createdAt: 1_700_000_010_404,
+    });
+
+    expect(firstCheckpoint).toEqual({
+      id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd04",
+      postId: initial.post.id,
+      version: 5,
+      title: firstDraft.title,
+      contentVersion: firstDraft.contentVersion,
+      contentJson: firstDraft.contentJson,
+      excerpt: firstDraft.excerpt,
+      metadataJson: firstDraft.metadataJson,
+      authorId: initial.author.id,
+      createdAt: 1_700_000_010_404,
+    });
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(draftBeforeFirstCheckpoint);
+
+    const secondDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: firstDraft.version,
+      authorId: initial.author.id,
+      title: "Second checkpoint title",
+      contentVersion: 1,
+      contentJson:
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Second checkpoint"}]}]}',
+      excerpt: null,
+      metadataJson: '{"stage":"second-checkpoint"}',
+      updatedAt: 1_700_000_010_405,
+    });
+    const draftBeforeSecondCheckpoint = await repository.getDraft(initial.post.id);
+
+    const secondCheckpoint = await repository.checkpointDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: secondDraft.version,
+      expectedRevisionVersion: firstCheckpoint.version,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd05",
+      authorId: initial.author.id,
+      createdAt: 1_700_000_010_406,
+    });
+
+    expect(secondCheckpoint).toEqual({
+      id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd05",
+      postId: initial.post.id,
+      version: 6,
+      title: secondDraft.title,
+      contentVersion: secondDraft.contentVersion,
+      contentJson: secondDraft.contentJson,
+      excerpt: secondDraft.excerpt,
+      metadataJson: secondDraft.metadataJson,
+      authorId: initial.author.id,
+      createdAt: 1_700_000_010_406,
+    });
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(
+      draftBeforeSecondCheckpoint,
+    );
+
+    const aggregate = await repository.getPostAggregate(initial.post.id);
+    expect([firstDraft.version, secondDraft.version]).toEqual([2, 3]);
+    expect(aggregate.revisions.map((revision) => revision.version)).toEqual([4, 5, 6]);
+    expect(aggregate.revisions).toEqual([initial.revision, firstCheckpoint, secondCheckpoint]);
+  });
+
+  it("rejects a stale draft checkpoint without changing the draft or revisions", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe01",
+        accessSubject: "subject-draft-checkpoint-stale-draft",
+        displayName: "Stale Draft Checkpoint Author",
+        createdAt: 1_700_000_010_500,
+        updatedAt: 1_700_000_010_500,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe02",
+        slug: "draft-checkpoint-stale-draft",
+        createdAt: 1_700_000_010_501,
+        updatedAt: 1_700_000_010_501,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe03",
+        version: 3,
+        title: "Initial stale-draft snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc","content":[]}',
+        createdAt: 1_700_000_010_502,
+      },
+    });
+    const currentDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: 1,
+      authorId: initial.author.id,
+      title: "Current stale-draft content",
+      contentVersion: 1,
+      contentJson:
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Current"}]}]}',
+      excerpt: "Current stale-draft excerpt",
+      metadataJson: '{"stage":"current"}',
+      updatedAt: 1_700_000_010_503,
+    });
+    const beforeDraft = await repository.getDraft(initial.post.id);
+    const beforeAggregate = await repository.getPostAggregate(initial.post.id);
+
+    await expect(
+      repository.checkpointDraft({
+        postId: initial.post.id,
+        expectedDraftVersion: currentDraft.version - 1,
+        expectedRevisionVersion: initial.revision.version,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe04",
+        authorId: initial.author.id,
+        createdAt: 1_700_000_010_504,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.CONFLICT,
+      message: "Draft checkpoint conflicted with a newer version",
+    });
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(beforeDraft);
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(beforeAggregate);
+  });
+
+  it("rejects a stale revision checkpoint without changing the draft or revisions", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff01",
+        accessSubject: "subject-draft-checkpoint-stale-revision",
+        displayName: "Stale Revision Checkpoint Author",
+        createdAt: 1_700_000_010_600,
+        updatedAt: 1_700_000_010_600,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff02",
+        slug: "draft-checkpoint-stale-revision",
+        createdAt: 1_700_000_010_601,
+        updatedAt: 1_700_000_010_601,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff03",
+        version: 6,
+        title: "Initial stale-revision snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc","content":[]}',
+        createdAt: 1_700_000_010_602,
+      },
+    });
+    const currentDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: 1,
+      authorId: initial.author.id,
+      title: "Current stale-revision content",
+      contentVersion: 1,
+      contentJson:
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Current"}]}]}',
+      excerpt: "Current stale-revision excerpt",
+      metadataJson: '{"stage":"current"}',
+      updatedAt: 1_700_000_010_603,
+    });
+    const appended = await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: initial.author.id,
+      expectedVersion: initial.revision.version,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff04",
+        title: "Concurrent immutable snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc","content":[]}',
+        createdAt: 1_700_000_010_604,
+      },
+    });
+    const beforeDraft = await repository.getDraft(initial.post.id);
+    const beforeAggregate = await repository.getPostAggregate(initial.post.id);
+
+    await expect(
+      repository.checkpointDraft({
+        postId: initial.post.id,
+        expectedDraftVersion: currentDraft.version,
+        expectedRevisionVersion: initial.revision.version,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff05",
+        authorId: initial.author.id,
+        createdAt: 1_700_000_010_605,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.CONFLICT,
+      message: "Draft checkpoint conflicted with a newer version",
+    });
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(beforeDraft);
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(beforeAggregate);
+    expect(beforeAggregate.revisions).toEqual([initial.revision, appended]);
+  });
+
+  it("maps a checkpoint for a missing draft to not-found", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+
+    await expect(
+      repository.checkpointDraft({
+        postId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff11",
+        expectedDraftVersion: 1,
+        expectedRevisionVersion: 1,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff12",
+        authorId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff13",
+        createdAt: 1_700_000_010_606,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+      message: "post draft was not found",
+    });
+  });
+
   it("rejects stale saves without changing the entire draft", async () => {
     const repository = createEditorialRepository(env.TEST_DB);
     const initial = await repository.createAuthorPostRevision({

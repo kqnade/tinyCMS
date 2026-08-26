@@ -73,6 +73,15 @@ export interface SaveDraftInput {
   updatedAt: number;
 }
 
+export interface CheckpointDraftInput {
+  postId: string;
+  expectedDraftVersion: number;
+  expectedRevisionVersion: number;
+  revisionId: string;
+  authorId: string;
+  createdAt: number;
+}
+
 export interface AppendRevisionInput {
   postId: string;
   authorId: string;
@@ -113,6 +122,7 @@ export interface EditorialRepository {
   appendRevision(input: AppendRevisionInput): Promise<PostRevision>;
   restoreRevision(input: RestoreRevisionInput): Promise<PostRevision>;
   saveDraft(input: SaveDraftInput): Promise<PostDraft>;
+  checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
   getAuthor(id: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
@@ -221,6 +231,77 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       throw new RepositoryError(
         RepositoryErrorCode.WRITE_FAILED,
         "Failed to save post draft",
+        cause,
+      );
+    }
+  };
+
+  const checkpointDraft = async ({
+    postId,
+    expectedDraftVersion,
+    expectedRevisionVersion,
+    revisionId,
+    authorId,
+    createdAt,
+  }: CheckpointDraftInput): Promise<PostRevision> => {
+    try {
+      const result = await database
+        .prepare(
+          `INSERT INTO post_revisions (
+             id, post_id, version, title, content_version, content_json,
+             excerpt, metadata_json, author_id, created_at
+           )
+           SELECT ?, draft.post_id, current.version + 1, draft.title,
+             draft.content_version, draft.content_json, draft.excerpt,
+             draft.metadata_json, ?, ?
+           FROM post_drafts AS draft
+           JOIN (
+             SELECT post_id, MAX(version) AS version
+             FROM post_revisions
+             WHERE post_id = ?
+             GROUP BY post_id
+           ) AS current ON current.post_id = draft.post_id
+           WHERE draft.post_id = ?
+             AND draft.version = ?
+             AND current.version = ?
+           RETURNING id, post_id AS "postId", version, title,
+             content_version AS "contentVersion", content_json AS "contentJson",
+             excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+             created_at AS "createdAt"`,
+        )
+        .bind(
+          revisionId,
+          authorId,
+          createdAt,
+          postId,
+          postId,
+          expectedDraftVersion,
+          expectedRevisionVersion,
+        )
+        .all<PostRevision>();
+      const checkpoint = result.results[0];
+      if (checkpoint !== undefined) {
+        return checkpoint;
+      }
+
+      const draft = await database
+        .prepare('SELECT post_id AS "postId" FROM post_drafts WHERE post_id = ?')
+        .bind(postId)
+        .first<{ postId: string }>();
+      if (draft === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post draft was not found");
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.CONFLICT,
+        "Draft checkpoint conflicted with a newer version",
+      );
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to checkpoint post draft",
         cause,
       );
     }
@@ -541,6 +622,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     appendRevision,
     restoreRevision,
     saveDraft,
+    checkpointDraft,
     getAuthor,
     getPost,
     getPostBySlug,
