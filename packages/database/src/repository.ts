@@ -1,12 +1,13 @@
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { authors, postRevisions, posts, schema, type searchChunks } from "./schema";
+import { authors, postDrafts, postRevisions, posts, schema, type searchChunks } from "./schema";
 
 export const MAX_SEARCH_QUERY_LENGTH = 256;
 
 export type Author = typeof authors.$inferSelect;
 export type Post = typeof posts.$inferSelect;
 export type PostRevision = typeof postRevisions.$inferSelect;
+export type PostDraft = typeof postDrafts.$inferSelect;
 export type SearchChunk = typeof searchChunks.$inferSelect;
 
 export const RepositoryErrorCode = {
@@ -103,6 +104,7 @@ export interface EditorialRepository {
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
   getRevision(id: string): Promise<PostRevision>;
+  getDraft(postId: string): Promise<PostDraft>;
   getPostAggregate(id: string): Promise<PostAggregate>;
   purgePost(id: string): Promise<void>;
   searchChunks(query: string): Promise<SearchChunk[]>;
@@ -140,6 +142,12 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     readOne(
       db.select().from(postRevisions).where(eq(postRevisions.id, id)).limit(1),
       "post revision",
+    );
+
+  const getDraft = (postId: string): Promise<PostDraft> =>
+    readOne(
+      db.select().from(postDrafts).where(eq(postDrafts.postId, postId)).limit(1),
+      "post draft",
     );
 
   const searchChunksByQuery = async (query: string): Promise<SearchChunk[]> => {
@@ -234,7 +242,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
   ): Promise<CreatedAuthorPostRevision> => {
     const { author, post, revision } = input;
     try {
-      const [createdAuthors, createdPosts, createdRevisions] = await db.batch([
+      const [createdAuthors, createdPosts, createdRevisions, createdDrafts] = await db.batch([
         db
           .insert(authors)
           .values({
@@ -277,6 +285,20 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
             createdAt: revision.createdAt,
           })
           .returning(),
+        db
+          .insert(postDrafts)
+          .values({
+            postId: post.id,
+            version: 1,
+            title: revision.title,
+            contentVersion: revision.contentVersion,
+            contentJson: revision.contentJson,
+            excerpt: revision.excerpt ?? null,
+            metadataJson: revision.metadataJson ?? "{}",
+            authorId: author.id,
+            updatedAt: revision.createdAt,
+          })
+          .returning(),
       ]);
       const createdAuthor = createdAuthors[0];
       const createdPost = createdPosts[0];
@@ -284,7 +306,8 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       if (
         createdAuthor === undefined ||
         createdPost === undefined ||
-        createdRevision === undefined
+        createdRevision === undefined ||
+        createdDrafts[0] === undefined
       ) {
         throw new Error("Create statements returned no rows");
       }
@@ -445,6 +468,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     getPost,
     getPostBySlug,
     getRevision,
+    getDraft,
     getPostAggregate,
     purgePost,
     searchChunks: searchChunksByQuery,
