@@ -11,6 +11,433 @@ function renderCommonmarkHtml(markdown: string): string {
 }
 
 describe("Markdown renderer", () => {
+  it("renders checked and unchecked task items with exact GFM markers", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: false },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Open" }] }],
+                },
+                {
+                  type: "taskItem",
+                  attrs: { checked: true },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Done" }] }],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("- [ ] Open\n- [x] Done");
+  });
+
+  it("indents task continuations and nested blocks by the six-character marker width", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: false },
+                  content: [
+                    { type: "paragraph", content: [{ type: "text", text: "Parent" }] },
+                    { type: "paragraph", content: [{ type: "text", text: "Continuation" }] },
+                    {
+                      type: "taskList",
+                      content: [
+                        {
+                          type: "taskItem",
+                          attrs: { checked: true },
+                          content: [
+                            { type: "paragraph", content: [{ type: "text", text: "Child" }] },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      type: "bulletList",
+                      content: [
+                        {
+                          type: "listItem",
+                          content: [
+                            { type: "paragraph", content: [{ type: "text", text: "Bullet" }] },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      type: "orderedList",
+                      attrs: { start: 3 },
+                      content: [
+                        {
+                          type: "listItem",
+                          content: [
+                            { type: "paragraph", content: [{ type: "text", text: "Ordered" }] },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      type: "blockquote",
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Quote" }] }],
+                    },
+                    {
+                      type: "codeBlock",
+                      attrs: { language: "typescript" },
+                      content: [{ type: "text", text: "const value = 1;" }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe(
+      [
+        "- [ ] Parent",
+        "",
+        "      Continuation",
+        "",
+        "      - [x] Child",
+        "",
+        "      - Bullet",
+        "",
+        "      3. Ordered",
+        "",
+        "      > Quote",
+        "",
+        "      ```typescript",
+        "      const value = 1;",
+        "      ```",
+      ].join("\n"),
+    );
+  });
+
+  it("renders the minimum table with a GFM delimiter row", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Ada" }] }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("| Name |\n| --- |\n| Ada |");
+  });
+
+  it("renders representative rectangular tables with inline marks and links", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }],
+                    },
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Role" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Ada" }] }],
+                    },
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            {
+                              type: "text",
+                              text: "Engineer",
+                              marks: [{ type: "bold" }],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Grace" }] }],
+                    },
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            {
+                              type: "text",
+                              text: "Compiler",
+                              marks: [{ type: "link", attrs: { href: "https://example.com" } }],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe(
+      [
+        "| Name | Role |",
+        "| --- | --- |",
+        "| Ada | **Engineer** |",
+        "| Grace | [Compiler](https://example.com) |",
+      ].join("\n"),
+    );
+  });
+
+  it("escapes table pipes once across text, code, links, and generated line breaks", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Plain" }] }],
+                    },
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Code" }] }],
+                    },
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Link" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [{ type: "text", text: "<script>|line1\nline2" }],
+                        },
+                      ],
+                    },
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [{ type: "text", text: "a|b", marks: [{ type: "code" }] }],
+                        },
+                      ],
+                    },
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            {
+                              type: "text",
+                              text: "link|text",
+                              marks: [{ type: "link", attrs: { href: "https://example.com/a|b" } }],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe(
+      [
+        "| Plain | Code | Link |",
+        "| --- | --- | --- |",
+        "| &lt;script&gt;\\|line1<br>line2 | `a\\|b` | [link\\|text](https://example.com/a\\|b) |",
+      ].join("\n"),
+    );
+  });
+
+  it("rejects malformed task and table nodes before rendering", () => {
+    const options = { resolveMediaUrl: () => null };
+    expect(() =>
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: "false" },
+                  content: [{ type: "paragraph" }],
+                },
+              ],
+            },
+          ],
+        },
+        options,
+      ),
+    ).toThrow(ContentValidationError);
+
+    const table = {
+      type: "table",
+      content: [
+        {
+          type: "tableRow",
+          content: [
+            {
+              type: "tableHeader",
+              attrs: { colspan: 2, rowspan: 1, colwidth: null },
+              content: [{ type: "paragraph" }],
+            },
+          ],
+        },
+        {
+          type: "tableRow",
+          content: [
+            {
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1, colwidth: null },
+              content: [{ type: "paragraph" }],
+            },
+          ],
+        },
+      ],
+    } as const;
+    expect(() =>
+      renderMarkdown(CONTENT_VERSION, { type: "doc", content: [table] }, options),
+    ).toThrow(ContentValidationError);
+
+    expect(() =>
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "html" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph" }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        options,
+      ),
+    ).toThrow(ContentValidationError);
+  });
+
   it("renders an empty document as an empty fragment", () => {
     expect(
       renderMarkdown(
@@ -545,5 +972,62 @@ describe("Markdown renderer", () => {
     expect(second).toBe(first);
     expect(input).toEqual(before);
     expect(first.endsWith("\n")).toBe(false);
+  });
+
+  it("keeps task and table output deterministic for frozen input", () => {
+    const input = {
+      type: "doc",
+      content: [
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: true },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Done" }] }],
+            },
+          ],
+        },
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Key" }] }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Value" }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+    const before = JSON.parse(JSON.stringify(input));
+    const freeze = (value: unknown): void => {
+      if (typeof value !== "object" || value === null || Object.isFrozen(value)) return;
+      Object.freeze(value);
+      for (const child of Object.values(value)) freeze(child);
+    };
+    freeze(input);
+
+    const first = renderMarkdown(CONTENT_VERSION, input, { resolveMediaUrl: () => null });
+    const second = renderMarkdown(CONTENT_VERSION, input, { resolveMediaUrl: () => null });
+
+    expect(second).toBe(first);
+    expect(input).toEqual(before);
+    expect(first).toBe("- [x] Done\n\n| Key |\n| --- |\n| Value |");
   });
 });

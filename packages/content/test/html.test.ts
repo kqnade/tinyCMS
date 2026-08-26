@@ -15,6 +15,361 @@ describe("HTML renderer", () => {
     ).toBe("");
   });
 
+  it("renders unchecked and checked task items with accessible deterministic markup", () => {
+    const document = {
+      type: "doc",
+      content: [
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: false },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Buy milk" }] }],
+            },
+            {
+              type: "taskItem",
+              attrs: { checked: true },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Ship release" }] }],
+            },
+          ],
+        },
+      ],
+    } as const;
+
+    expect(renderHtml(CONTENT_VERSION, document, { resolveMediaUrl: () => null })).toBe(
+      '<ul class="task-list"><li class="task-item" data-checked="false"><input type="checkbox" disabled aria-label="Incomplete task"><div class="task-item-content"><p>Buy milk</p></div></li>\n<li class="task-item" data-checked="true"><input type="checkbox" checked disabled aria-label="Completed task"><div class="task-item-content"><p>Ship release</p></div></li></ul>',
+    );
+  });
+
+  it("preserves nested task, list, quote, and code blocks inside task items", () => {
+    const document = {
+      type: "doc",
+      content: [
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: false },
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: "Parent" }] },
+                {
+                  type: "bulletList",
+                  content: [
+                    {
+                      type: "listItem",
+                      content: [
+                        { type: "paragraph", content: [{ type: "text", text: "Bullet child" }] },
+                        {
+                          type: "orderedList",
+                          attrs: { start: 2 },
+                          content: [
+                            {
+                              type: "listItem",
+                              content: [
+                                {
+                                  type: "paragraph",
+                                  content: [{ type: "text", text: "Ordered child" }],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                        {
+                          type: "taskList",
+                          content: [
+                            {
+                              type: "taskItem",
+                              attrs: { checked: true },
+                              content: [
+                                {
+                                  type: "paragraph",
+                                  content: [{ type: "text", text: "Nested task" }],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                        {
+                          type: "blockquote",
+                          content: [
+                            {
+                              type: "paragraph",
+                              content: [{ type: "text", text: "Quoted child" }],
+                            },
+                          ],
+                        },
+                        {
+                          type: "codeBlock",
+                          attrs: { language: "typescript" },
+                          content: [{ type: "text", text: "const value = 1;\n" }],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+
+    expect(renderHtml(CONTENT_VERSION, document, { resolveMediaUrl: () => null })).toBe(
+      '<ul class="task-list"><li class="task-item" data-checked="false"><input type="checkbox" disabled aria-label="Incomplete task"><div class="task-item-content"><p>Parent</p>\n<ul><li><p>Bullet child</p>\n<ol start="2"><li><p>Ordered child</p></li></ol>\n<ul class="task-list"><li class="task-item" data-checked="true"><input type="checkbox" checked disabled aria-label="Completed task"><div class="task-item-content"><p>Nested task</p></div></li></ul>\n<blockquote><p>Quoted child</p></blockquote>\n<pre><code class="language-typescript">const value = 1;\n</code></pre></li></ul></div></li></ul>',
+    );
+  });
+
+  it("renders tables with semantic sections, scoped headers, and paragraph cells", () => {
+    const cellAttrs = { colspan: 1, rowspan: 1, colwidth: null } as const;
+    const document = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: cellAttrs,
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }],
+                },
+                {
+                  type: "tableHeader",
+                  attrs: cellAttrs,
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Role" }] }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: cellAttrs,
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Ada" }] }],
+                },
+                {
+                  type: "tableCell",
+                  attrs: cellAttrs,
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Engineer" }] }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: cellAttrs,
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Grace" }] }],
+                },
+                {
+                  type: "tableCell",
+                  attrs: cellAttrs,
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Compiler" }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+
+    expect(renderHtml(CONTENT_VERSION, document, { resolveMediaUrl: () => null })).toBe(
+      '<table><thead><tr><th scope="col"><p>Name</p></th><th scope="col"><p>Role</p></th></tr></thead><tbody><tr><td><p>Ada</p></td><td><p>Engineer</p></td></tr>\n<tr><td><p>Grace</p></td><td><p>Compiler</p></td></tr></tbody></table>',
+    );
+  });
+
+  it("escapes HTML-looking text and marks inside task and table content", () => {
+    const cellAttrs = { colspan: 1, rowspan: 1, colwidth: null } as const;
+    const document = {
+      type: "doc",
+      content: [
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: false },
+              content: [
+                {
+                  type: "paragraph",
+                  content: [
+                    {
+                      type: "text",
+                      text: '<img src=x onerror="alert(1)"> &',
+                      marks: [
+                        { type: "link", attrs: { href: "https://example.com/?a=1&b=2" } },
+                        { type: "bold" },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: cellAttrs,
+                  content: [
+                    {
+                      type: "paragraph",
+                      content: [{ type: "text", text: "<script>alert(1)</script>" }],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: cellAttrs,
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "</td>" }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+
+    const output = renderHtml(CONTENT_VERSION, document, { resolveMediaUrl: () => null });
+
+    expect(output).toBe(
+      '<ul class="task-list"><li class="task-item" data-checked="false"><input type="checkbox" disabled aria-label="Incomplete task"><div class="task-item-content"><p><strong><a href="https://example.com/?a=1&amp;b=2" rel="noopener noreferrer">&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp;</a></strong></p></div></li></ul>\n<table><thead><tr><th scope="col"><p>&lt;script&gt;alert(1)&lt;/script&gt;</p></th></tr></thead><tbody><tr><td><p>&lt;/td&gt;</p></td></tr></tbody></table>',
+    );
+    expect(output).not.toContain("<script");
+    expect(output).not.toContain("<img");
+    expect(output).toContain("&lt;/td&gt;");
+    expect(output).not.toContain("<p></td>");
+  });
+
+  it("rejects malformed task and table nodes before rendering", () => {
+    const taskWithExtraAttr = {
+      type: "doc",
+      content: [
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: false, extra: true },
+              content: [{ type: "paragraph" }],
+            },
+          ],
+        },
+      ],
+    } as const;
+    const tableWithSpan = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 2, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph" }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph" }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+    const options = { resolveMediaUrl: () => null };
+
+    expect(() => renderHtml(CONTENT_VERSION, taskWithExtraAttr, options)).toThrow(
+      ContentValidationError,
+    );
+    expect(() => renderHtml(CONTENT_VERSION, tableWithSpan, options)).toThrow(
+      ContentValidationError,
+    );
+  });
+
+  it("renders task lists and tables deterministically without mutating frozen input", () => {
+    const input = {
+      type: "doc",
+      content: [
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: true },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Done" }] }],
+            },
+          ],
+        },
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "1" }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+    const before = JSON.parse(JSON.stringify(input));
+    const freeze = (value: unknown): void => {
+      if (typeof value !== "object" || value === null || Object.isFrozen(value)) return;
+      Object.freeze(value);
+      for (const child of Object.values(value)) freeze(child);
+    };
+    freeze(input);
+
+    const options = { resolveMediaUrl: () => null };
+    const first = renderHtml(CONTENT_VERSION, input, options);
+    const second = renderHtml(CONTENT_VERSION, input, options);
+
+    expect(second).toBe(first);
+    expect(input).toEqual(before);
+  });
+
   it("renders every canonical v1 block, nested block, and inline mark in fixed order", () => {
     const expected = [
       '<p><strong><em><s><code><a href="https://example.com/article" rel="noopener noreferrer">HTML-looking data: &lt;script&gt;alert(1)&lt;/script&gt;</a></code></s></em></strong>\nnext plain</p>',

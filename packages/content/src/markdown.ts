@@ -5,6 +5,9 @@ import {
   type ContentCodeBlockNode,
   type ContentListItemChild,
   type ContentListNode,
+  type ContentTableNode,
+  type ContentTableRowNode,
+  type ContentTaskListNode,
   type ContentTextNode,
   parseContentDocument,
 } from "./schema";
@@ -51,6 +54,10 @@ function renderBlock(block: ContentBlock, context: RenderContext): string {
     case "bulletList":
     case "orderedList":
       return renderList(block, context);
+    case "taskList":
+      return renderTaskList(block, context);
+    case "table":
+      return renderTable(block);
     case "blockquote":
       return renderBlockquote(block, context);
     case "codeBlock":
@@ -116,6 +123,57 @@ function renderListItemChild(child: ContentListItemChild, context: RenderContext
   return renderBlock(child, context);
 }
 
+function renderTaskList(block: ContentTaskListNode, context: RenderContext): string {
+  return block.content
+    .map((item) => {
+      const marker = item.attrs.checked ? "- [x] " : "- [ ] ";
+      const continuation = " ".repeat(marker.length);
+      const firstChild = item.content[0];
+      if (firstChild === undefined) {
+        return marker.trimEnd();
+      }
+
+      const first = renderBlock(firstChild, context);
+      const itemLines = first
+        .split("\n")
+        .map((line, lineIndex) =>
+          lineIndex === 0 ? `${marker}${line}` : `${continuation}${line}`,
+        );
+      for (const child of item.content.slice(1)) {
+        itemLines.push("");
+        const renderedChild = renderBlock(child, context);
+        itemLines.push(
+          ...renderedChild
+            .split("\n")
+            .map((line) => (line.length === 0 ? line : `${continuation}${line}`)),
+        );
+      }
+      return itemLines.join("\n");
+    })
+    .join("\n");
+}
+
+function renderTable(block: ContentTableNode): string {
+  const header = block.content[0];
+  const body = block.content.slice(1);
+  const headerCells = header?.content ?? [];
+  const lines = [renderTableRow(headerCells), renderTableDelimiter(headerCells.length)];
+  lines.push(...body.map((row) => renderTableRow(row.content)));
+  return lines.join("\n");
+}
+
+function renderTableRow(cells: ContentTableRowNode["content"]): string {
+  return `| ${cells
+    .map((cell) =>
+      renderInline(cell.content[0]?.content, { tableCell: true }).replaceAll("\n", "<br>"),
+    )
+    .join(" | ")} |`;
+}
+
+function renderTableDelimiter(columnCount: number): string {
+  return `| ${Array.from({ length: columnCount }, () => "---").join(" | ")} |`;
+}
+
 function renderBlockquote(block: ContentBlockquoteNode, context: RenderContext): string {
   return prefixBlockquote(renderBlocks(block.content, context));
 }
@@ -170,11 +228,18 @@ function renderCallout(
   return prefixBlockquote(`**${label}**${body.length === 0 ? "" : `\n\n${body}`}`);
 }
 
-function renderInline(content: readonly ContentTextNode[] | undefined): string {
-  return (content ?? []).map(renderText).join("");
+type InlineRenderOptions = {
+  readonly tableCell?: boolean;
+};
+
+function renderInline(
+  content: readonly ContentTextNode[] | undefined,
+  options: InlineRenderOptions = {},
+): string {
+  return (content ?? []).map((node) => renderText(node, options)).join("");
 }
 
-function renderText(node: ContentTextNode): string {
+function renderText(node: ContentTextNode, options: InlineRenderOptions = {}): string {
   const marks = node.marks ?? [];
   const codeMark = marks.find((mark) => mark.type === "code");
   const value =
@@ -185,11 +250,13 @@ function renderText(node: ContentTextNode): string {
     return value.leading;
   }
   let result =
-    codeMark === undefined ? escapeMarkdownText(value.content) : renderCodeSpan(value.content);
+    codeMark === undefined
+      ? escapeMarkdownText(value.content)
+      : renderCodeSpan(value.content, options.tableCell === true);
 
   const linkMark = marks.find((mark) => mark.type === "link");
   if (linkMark?.type === "link") {
-    result = `[${result}](${escapeLinkDestination(linkMark.attrs.href)})`;
+    result = `[${result}](${escapeLinkDestination(linkMark.attrs.href, options.tableCell === true)})`;
   }
 
   for (let index = marks.length - 1; index >= 0; index -= 1) {
@@ -229,13 +296,14 @@ function splitBoundaryWhitespace(value: string): {
   };
 }
 
-function renderCodeSpan(value: string): string {
+function renderCodeSpan(value: string, tableCell = false): string {
   const delimiter = "`".repeat(Math.max(1, longestBacktickRun(value) + 1));
   const needsPadding =
     !/^ +$/u.test(value) &&
     (value.startsWith(" ") || value.endsWith(" ") || value.startsWith("`") || value.endsWith("`"));
   const payload = needsPadding ? ` ${value} ` : value;
-  return `${delimiter}${payload}${delimiter}`;
+  const escapedPayload = tableCell ? escapeTablePipe(payload) : payload;
+  return `${delimiter}${escapedPayload}${delimiter}`;
 }
 
 function longestBacktickRun(value: string): number {
@@ -355,8 +423,8 @@ function escapeMarkdownTitle(value: string): string {
   return escapeMarkdownText(value).replaceAll('"', '\\"').replaceAll("\n", " ");
 }
 
-function escapeLinkDestination(value: string): string {
-  return value
+function escapeLinkDestination(value: string, tableCell = false): string {
+  const escaped = value
     .replaceAll("\\", "\\\\")
     .replaceAll("<", "%3C")
     .replaceAll(">", "%3E")
@@ -364,6 +432,11 @@ function escapeLinkDestination(value: string): string {
     .replaceAll(")", "\\)")
     .replaceAll("[", "\\[")
     .replaceAll("]", "\\]");
+  return tableCell ? escapeTablePipe(escaped) : escaped;
+}
+
+function escapeTablePipe(value: string): string {
+  return value.replaceAll("|", "\\|");
 }
 
 function trimTrailingNewlines(value: string): string {
