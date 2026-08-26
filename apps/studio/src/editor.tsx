@@ -41,6 +41,7 @@ export type StudioEditorProps = {
   "aria-label"?: string;
   className?: string;
   content?: EditorContent;
+  editable?: boolean;
   initialContent?: EditorContent;
   onChange?: (content: EditorContent) => void;
 };
@@ -377,7 +378,14 @@ function getSlashCommands(query: string, tableAvailable: boolean): readonly Slas
 }
 
 export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(function StudioEditor(
-  { "aria-label": ariaLabel = "Editor", className, content, initialContent, onChange },
+  {
+    "aria-label": ariaLabel = "Editor",
+    className,
+    content,
+    editable = true,
+    initialContent,
+    onChange,
+  },
   ref,
 ) {
   const emptyContent = useMemo(() => createEmptyEditorContent(), []);
@@ -386,6 +394,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
     [content, initialContent, emptyContent],
   );
   const initialDocument = useRef(resolvedContent.content);
+  const editableRef = useRef(editable);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [selection, setSelection] = useState({ from: 0, to: 0 });
@@ -404,6 +413,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
       },
       extensions: editorExtensions,
       content: toTiptapDocument(initialDocument.current),
+      editable,
       immediatelyRender: false,
       onUpdate: ({ editor: changedEditor }) => {
         updateSlashState(changedEditor);
@@ -430,6 +440,12 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
     setSlashState(null);
     setSlashIndex(0);
   }, [content, editor, resolvedContent]);
+
+  useEffect(() => {
+    if (editableRef.current === editable) return;
+    editableRef.current = editable;
+    editor?.setEditable(editable);
+  }, [editable, editor]);
 
   useImperativeHandle(
     ref,

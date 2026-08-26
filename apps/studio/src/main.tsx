@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { createEditorialApi } from "./editorial-api";
 import "./styles.css";
 
 const rootElement = document.getElementById("root");
@@ -9,8 +10,10 @@ if (!rootElement) {
   throw new Error("Studio root element was not found");
 }
 
+const api = createEditorialApi();
+
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <App api={api} />
   </StrictMode>,
 );

@@ -408,6 +408,103 @@ input[readonly] {
   background: var(--surface-muted);
 }
 
+.studio-side-panel {
+  position: fixed;
+  z-index: 20;
+  top: 3rem;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  width: min(20rem, calc(100vw - 1rem));
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-right: 1px solid var(--border);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.studio-side-panel[hidden] {
+  display: none;
+}
+
+.studio-side-panel nav {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.studio-side-panel__content {
+  min-width: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.studio-post-list,
+.studio-history-list {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.studio-post-list__item,
+.studio-history-list__item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: start;
+}
+
+.studio-post-list__item:hover,
+.studio-post-list__item[aria-current="true"],
+.studio-history-list__item:hover {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+
+.studio-post-list__item span,
+.studio-history-list__item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-history-list__item time {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: var(--font-size-xs);
+}
+
+.studio-history-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.studio-workspace-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .studio-side-panel {
+    width: min(18rem, calc(100vw - 1rem));
+  }
+}
+
 .ui-field {
   display: grid;
   gap: var(--space-2);
@@ -603,30 +700,6 @@ input[readonly] {
   color: #0369a1;
 }
 
-.studio-side-panel {
-  position: fixed;
-  z-index: 20;
-  top: 3rem;
-  bottom: 0;
-  left: 0;
-  width: 4rem;
-  padding: var(--space-3) var(--space-2);
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
-}
-
-.studio-side-panel[hidden] {
-  display: none;
-}
-
-.studio-side-panel nav {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
@@ -677,10 +750,6 @@ input[readonly] {
 
   .studio-editor {
     padding-inline: clamp(0rem, 3vw, var(--space-6));
-  }
-
-  .studio-side-panel {
-    width: 3.5rem;
   }
 }
 
