@@ -85,6 +85,8 @@ export type PostListQuery = {
   limit?: number;
 };
 
+export type PostRevisionListQuery = PostListQuery;
+
 export type PostRouteParams = {
   postId: UuidV7;
 };
