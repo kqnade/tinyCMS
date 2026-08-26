@@ -54,6 +54,7 @@ export type DraftSession = {
   readonly content: EditorContent;
   readonly draftVersion: number;
   readonly getSnapshot: () => DraftSnapshot;
+  readonly getSaveState: () => DraftSaveState;
   readonly hydrate: (snapshot: DraftSnapshot) => void;
   readonly markSaveState: (state: DraftSaveState) => void;
   readonly save: () => Promise<void>;
@@ -253,7 +254,9 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
         if (!unchanged) scheduleAutosave();
       })
       .finally(() => {
-        pendingSaveRef.current = null;
+        if (generationAtRequest === saveGenerationRef.current) {
+          pendingSaveRef.current = null;
+        }
       });
 
     pendingSaveRef.current = pending;
@@ -328,10 +331,13 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
     [updateState],
   );
 
+  const getSaveState = useCallback(() => saveStateRef.current, []);
+
   return {
     content: snapshot.content,
     draftVersion: snapshot.draftVersion,
     getSnapshot,
+    getSaveState,
     hydrate,
     markSaveState,
     save,
