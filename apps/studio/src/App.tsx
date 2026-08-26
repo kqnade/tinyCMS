@@ -255,6 +255,8 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
     ...sessionOptions,
     ...(persistence === undefined ? {} : { persistence }),
   });
+  const saveDraftSession = session.save;
+  const getDraftSaveState = session.getSaveState;
 
   const applyPost = useCallback(
     (post: PostDto) => {
@@ -297,45 +299,86 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
     [api, applyPost],
   );
 
+  const loadWorkspace = useCallback(
+    async (preserveCurrent = false) => {
+      if (api === undefined) return;
+      setWorkspaceState("loading");
+      const page = await api.listPosts({ limit: 50 });
+      setPosts(page.items);
+
+      const currentPostId = selectedPostIdRef.current;
+      if (preserveCurrent && currentPostId !== null) {
+        const current = page.items.find((item) => item.id === currentPostId);
+        if (current === undefined) {
+          setWorkspaceState("ready");
+          return;
+        }
+        await saveDraftSession();
+        if (getDraftSaveState() !== "saved") {
+          setWorkspaceState("ready");
+          return;
+        }
+        await loadPost(current.id);
+        return;
+      }
+
+      if (preserveCurrent && getDraftSaveState() !== "saved") {
+        setWorkspaceState("ready");
+        return;
+      }
+
+      const requested = requestedPostId();
+      const selected =
+        (requested === undefined ? undefined : page.items.find((item) => item.id === requested)) ??
+        page.items[0];
+      if (selected === undefined) {
+        setWorkspaceState("ready");
+        return;
+      }
+      await loadPost(selected.id);
+    },
+    [api, getDraftSaveState, loadPost, saveDraftSession],
+  );
+
   useEffect(() => {
     if (api === undefined || startedApiRef.current === api) return;
     startedApiRef.current = api;
     let active = true;
-    void (async () => {
-      try {
-        const page = await api.listPosts({ limit: 50 });
-        if (!active) return;
-        setPosts(page.items);
-        const requested = requestedPostId();
-        const selected =
-          (requested === undefined
-            ? undefined
-            : page.items.find((item) => item.id === requested)) ?? page.items[0];
-        if (selected === undefined) {
-          setWorkspaceState("ready");
-          return;
-        }
-        await loadPost(selected.id);
-      } catch {
-        if (active) setWorkspaceState("error");
-      }
-    })();
+    void loadWorkspace().catch(() => {
+      if (active) setWorkspaceState("error");
+    });
     return () => {
       active = false;
     };
-  }, [api, loadPost]);
+  }, [api, loadWorkspace]);
+
+  const retryWorkspace = useCallback(async () => {
+    if (api === undefined || workspaceAction !== null) return;
+    setWorkspaceAction("retry");
+    try {
+      await loadWorkspace(true);
+    } catch {
+      setWorkspaceState("error");
+    } finally {
+      setWorkspaceAction(null);
+    }
+  }, [api, loadWorkspace, workspaceAction]);
 
   const createPost = useCallback(async () => {
     if (api === undefined || workspaceAction !== null) return;
     setWorkspaceAction("create");
     try {
-      await session.save();
-      if (session.getSaveState() !== "saved") return;
-      const empty = createEmptyEditorContent();
+      const hasSelectedPost = selectedPostId !== null;
+      if (hasSelectedPost) {
+        await session.save();
+        if (session.getSaveState() !== "saved") return;
+      }
+      const snapshot = session.getSnapshot();
+      const content = hasSelectedPost ? createEmptyEditorContent() : snapshot.content;
       const post = await api.createPost({
-        content: empty.content,
-        contentVersion: empty.contentVersion,
-        title: "",
+        content: content.content,
+        contentVersion: content.contentVersion,
+        title: hasSelectedPost ? "" : snapshot.title,
       });
       setPosts((current) => updatePostList(current, post));
       await loadPost(post.id);
@@ -344,7 +387,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
     } finally {
       setWorkspaceAction(null);
     }
-  }, [api, loadPost, session, workspaceAction]);
+  }, [api, loadPost, selectedPostId, session, workspaceAction]);
 
   const switchPost = useCallback(
     async (postId: string) => {
@@ -472,7 +515,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
       session.saveState === "conflict" ||
       session.saveState === "error");
   const statusLabel = statusLabels[session.saveState];
-  const editorBusy = loadingPostId !== null;
+  const editorBusy = workspaceState === "loading" || loadingPostId !== null;
 
   return (
     <div className="studio-shell" data-panel-open={panelOpen}>
@@ -578,7 +621,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             <Button
               aria-label="New post"
               className="studio-icon-button"
-              disabled={workspaceAction !== null}
+              disabled={workspaceAction !== null || editorBusy}
               onClick={() => void createPost()}
               variant="ghost"
             >
@@ -662,11 +705,36 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             key={`${selectedPostId ?? "empty"}-${editorVersion}`}
             onChange={session.setContent}
           />
-          <span
-            aria-live="polite"
-            className="studio-workspace-status"
+          <div
+            className={`studio-workspace-indicator studio-workspace-indicator--${workspaceState}`}
             data-state={workspaceState}
-          />
+          >
+            {workspaceState === "loading" ? (
+              <span
+                aria-label="Loading workspace"
+                className="studio-workspace-indicator__dot"
+                role="status"
+              />
+            ) : null}
+            {workspaceState === "error" ? (
+              <>
+                <span
+                  aria-label="Workspace unavailable"
+                  className="studio-workspace-indicator__dot"
+                  role="status"
+                />
+                <Button
+                  aria-label="Retry workspace"
+                  className="studio-icon-button"
+                  disabled={workspaceAction !== null}
+                  onClick={() => void retryWorkspace()}
+                  variant="ghost"
+                >
+                  <Icon name="refresh" />
+                </Button>
+              </>
+            ) : null}
+          </div>
         </section>
       </main>
     </div>

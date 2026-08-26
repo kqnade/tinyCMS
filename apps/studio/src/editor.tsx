@@ -417,6 +417,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
       immediatelyRender: false,
       onUpdate: ({ editor: changedEditor }) => {
         updateSlashState(changedEditor);
+        if (!changedEditor.isEditable) return;
         onChangeRef.current?.(cloneEditorContent(getCanonicalContent(changedEditor)));
       },
       onSelectionUpdate: ({ editor: changedEditor }) => {

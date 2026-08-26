@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   ErrorCode,
   type PostDto,
@@ -68,6 +69,45 @@ function listItem(value: PostDto): PostListItemDto {
 
 const firstPost = post(firstId, "First post", "First body");
 const secondPost = post(secondId, "Second post", "Second body");
+
+function installJsdomGeometry() {
+  const rect = {
+    bottom: 20,
+    height: 20,
+    left: 0,
+    right: 640,
+    top: 0,
+    width: 640,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
+
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => document.querySelector(".ProseMirror"),
+  });
+  Object.defineProperty(window, "scrollBy", {
+    configurable: true,
+    value: () => undefined,
+  });
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => rect,
+  });
+  Object.defineProperty(HTMLElement.prototype, "getClientRects", {
+    configurable: true,
+    value: () => [rect],
+  });
+  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => rect,
+  });
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value: () => [rect],
+  });
+}
 
 function revision(
   postId: string,
@@ -173,6 +213,104 @@ describe("Studio editorial workspace", () => {
       }),
     );
     await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(created.id));
+  });
+
+  it("keeps the initial editor locked until an empty post list is known", async () => {
+    let resolvePosts:
+      | ((page: { items: PostListItemDto[]; nextCursor: string | null }) => void)
+      | undefined;
+    const api = createMockApi({
+      listPosts: vi.fn(
+        () =>
+          new Promise<{ items: PostListItemDto[]; nextCursor: string | null }>((resolve) => {
+            resolvePosts = resolve;
+          }),
+      ),
+    });
+    render(<App api={api} />);
+
+    await waitFor(() => {
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).disabled).toBe(
+        true,
+      );
+      expect(screen.getByRole("textbox", { name: "Body" }).getAttribute("contenteditable")).toBe(
+        "false",
+      );
+    });
+    resolvePosts?.({ items: [], nextCursor: null });
+    await waitFor(() => {
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).disabled).toBe(
+        false,
+      );
+      expect(screen.getByRole("textbox", { name: "Body" }).getAttribute("contenteditable")).toBe(
+        "true",
+      );
+    });
+  });
+
+  it("shows a compact retry affordance for workspace load failures", async () => {
+    const listPosts = vi
+      .fn<EditorialApi["listPosts"]>()
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ items: [listItem(firstPost)], nextCursor: null });
+    const api = createMockApi({ listPosts });
+    render(<App api={api} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "Workspace unavailable" })).toBeTruthy(),
+    );
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Retry workspace" }));
+
+    await waitFor(() => expect(listPosts).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+    await waitFor(() =>
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+        "First post",
+      ),
+    );
+  });
+
+  it("creates an empty-list draft from retained local title and body", async () => {
+    const created = post("018f0e5d-6a25-7b01-8f4a-7d62a5d3e404", "Local title", "Local body");
+    const createPost = vi.fn<EditorialApi["createPost"]>(async () => created);
+    const api = createMockApi({
+      createPost,
+      getPost: vi.fn(async () => created),
+      listPosts: vi.fn(async () => ({ items: [], nextCursor: null })),
+    });
+    const user = userEvent.setup();
+    installJsdomGeometry();
+    render(<App api={api} />);
+    await waitFor(() => expect(api.listPosts).toHaveBeenCalledWith({ limit: 50 }));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "Local title" },
+    });
+    await user.type(screen.getByRole("textbox", { name: "Body" }), "Local body");
+    await openStudioMenu();
+    fireEvent.click(screen.getByRole("button", { name: "New post" }));
+
+    await waitFor(() =>
+      expect(createPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.objectContaining({
+            content: expect.arrayContaining([
+              expect.objectContaining({
+                content: expect.arrayContaining([expect.objectContaining({ text: "Local body" })]),
+              }),
+            ]),
+          }),
+          contentVersion: 1,
+          title: "Local title",
+        }),
+      ),
+    );
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(created.id));
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+      "Local title",
+    );
+    expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("Local body");
   });
 
   it("selects another post from the compact Posts panel and hydrates its editor", async () => {

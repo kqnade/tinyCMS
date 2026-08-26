@@ -283,7 +283,9 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
 
   const setContent = useCallback(
     (content: EditorContent) => {
-      updateSnapshot({ ...snapshotRef.current, content: cloneEditorContent(content) });
+      const nextContent = cloneEditorContent(content);
+      if (JSON.stringify(snapshotRef.current.content) === JSON.stringify(nextContent)) return;
+      updateSnapshot({ ...snapshotRef.current, content: nextContent });
       updateState("dirty");
       scheduleAutosave();
     },
