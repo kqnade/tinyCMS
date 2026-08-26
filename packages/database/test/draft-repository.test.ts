@@ -178,6 +178,9 @@ describe("editorial repository drafts", () => {
       metadataJson: JSON.stringify({ stage: "first", marker: "metadata'); --" }),
       updatedAt: 1_700_000_010_204,
     });
+    await expect(repository.getPost(initial.post.id)).resolves.toMatchObject({
+      updatedAt: 1_700_000_010_204,
+    });
     const secondSave = await repository.saveDraft({
       postId: initial.post.id,
       expectedDraftVersion: 2,
@@ -190,6 +193,9 @@ describe("editorial repository drafts", () => {
       }),
       excerpt: null,
       metadataJson: JSON.stringify({ stage: "second", marker: "metadata'); --" }),
+      updatedAt: 1_700_000_010_205,
+    });
+    await expect(repository.getPost(initial.post.id)).resolves.toMatchObject({
       updatedAt: 1_700_000_010_205,
     });
 
@@ -523,6 +529,7 @@ describe("editorial repository drafts", () => {
       updatedAt: 1_700_000_010_303,
     });
     const beforeStaleSave = await repository.getDraft(initial.post.id);
+    const beforeStalePost = await repository.getPost(initial.post.id);
 
     let error: unknown;
     try {
@@ -549,6 +556,7 @@ describe("editorial repository drafts", () => {
     });
     expect((error as RepositoryError).message).not.toMatch(/UPDATE|post_drafts|SQL/i);
     expect(current).toEqual(beforeStaleSave);
+    await expect(repository.getPost(initial.post.id)).resolves.toEqual(beforeStalePost);
     await expect(repository.getDraft(initial.post.id)).resolves.toEqual(beforeStaleSave);
   });
 
@@ -569,6 +577,106 @@ describe("editorial repository drafts", () => {
       code: RepositoryErrorCode.NOT_FOUND,
       message: "post draft was not found",
     });
+  });
+
+  it("preserves an existing post when its draft was deleted", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc21",
+        accessSubject: "subject-draft-save-deleted-draft",
+        displayName: "Deleted Draft Author",
+        createdAt: 1_700_000_010_320,
+        updatedAt: 1_700_000_010_320,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc22",
+        slug: "draft-save-deleted-draft",
+        createdAt: 1_700_000_010_321,
+        updatedAt: 1_700_000_010_321,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc23",
+        version: 1,
+        title: "Deleted draft initial",
+        contentVersion: 1,
+        contentJson,
+        createdAt: 1_700_000_010_322,
+      },
+    });
+    const beforeSave = await repository.getPost(initial.post.id);
+    await env.TEST_DB.prepare("DELETE FROM post_drafts WHERE post_id = ?")
+      .bind(initial.post.id)
+      .run();
+
+    await expect(
+      repository.saveDraft({
+        postId: initial.post.id,
+        expectedDraftVersion: 1,
+        authorId: initial.author.id,
+        title: "Deleted draft replacement",
+        contentVersion: 1,
+        contentJson,
+        updatedAt: 1_700_000_010_323,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+      message: "post draft was not found",
+    });
+    await expect(repository.getPost(initial.post.id)).resolves.toEqual(beforeSave);
+  });
+
+  it("rolls back the post timestamp when saving the draft fails", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc31",
+        accessSubject: "subject-draft-save-rollback",
+        displayName: "Draft Save Rollback Author",
+        createdAt: 1_700_000_010_330,
+        updatedAt: 1_700_000_010_330,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc32",
+        slug: "draft-save-rollback",
+        createdAt: 1_700_000_010_331,
+        updatedAt: 1_700_000_010_331,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc33",
+        version: 1,
+        title: "Save rollback initial",
+        contentVersion: 1,
+        contentJson,
+        createdAt: 1_700_000_010_332,
+      },
+    });
+    const beforePost = await repository.getPost(initial.post.id);
+    const beforeDraft = await repository.getDraft(initial.post.id);
+
+    let error: unknown;
+    try {
+      await repository.saveDraft({
+        postId: initial.post.id,
+        expectedDraftVersion: beforeDraft.version,
+        authorId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc34",
+        title: "Rejected draft",
+        contentVersion: 1,
+        contentJson,
+        updatedAt: 1_700_000_010_333,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({
+      code: RepositoryErrorCode.WRITE_FAILED,
+      message: "Failed to save post draft",
+    });
+    expect((error as RepositoryError).message).not.toMatch(/UPDATE|post_drafts|SQL/i);
+    await expect(repository.getPost(initial.post.id)).resolves.toEqual(beforePost);
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(beforeDraft);
   });
 
   it("maps a missing draft to a stable not-found error", async () => {

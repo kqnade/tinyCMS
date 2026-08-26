@@ -202,32 +202,51 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     updatedAt,
   }: SaveDraftInput): Promise<PostDraft> => {
     try {
-      const result = await database
-        .prepare(
-          `UPDATE post_drafts
-           SET title = ?, content_version = ?, content_json = ?, excerpt = ?,
-             metadata_json = ?, author_id = ?, updated_at = ?, version = version + 1
-           WHERE post_id = ? AND version = ?
-           RETURNING post_id AS "postId", version, title,
-             content_version AS "contentVersion", content_json AS "contentJson",
-             excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
-             updated_at AS "updatedAt"`,
-        )
-        .bind(
-          title,
-          contentVersion,
-          contentJson,
-          excerpt ?? null,
-          metadataJson ?? "{}",
-          authorId,
-          updatedAt,
-          postId,
-          expectedDraftVersion,
-        )
-        .all<PostDraft>();
-      const savedDraft = result.results[0];
-      if (savedDraft !== undefined) {
+      const [postResult, draftResult] = await database.batch([
+        database
+          .prepare(
+            `UPDATE posts
+             SET updated_at = ?
+             WHERE id = ?
+               AND EXISTS (
+                 SELECT 1
+                 FROM post_drafts
+                 WHERE post_drafts.post_id = posts.id
+                   AND post_drafts.version = ?
+               )`,
+          )
+          .bind(updatedAt, postId, expectedDraftVersion),
+        database
+          .prepare(
+            `UPDATE post_drafts
+             SET title = ?, content_version = ?, content_json = ?, excerpt = ?,
+               metadata_json = ?, author_id = ?, updated_at = ?, version = version + 1
+             WHERE post_id = ? AND version = ?
+             RETURNING post_id AS "postId", version, title,
+               content_version AS "contentVersion", content_json AS "contentJson",
+               excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+               updated_at AS "updatedAt"`,
+          )
+          .bind(
+            title,
+            contentVersion,
+            contentJson,
+            excerpt ?? null,
+            metadataJson ?? "{}",
+            authorId,
+            updatedAt,
+            postId,
+            expectedDraftVersion,
+          ),
+      ]);
+      const savedDraft = draftResult?.results[0] as PostDraft | undefined;
+      const postUpdated = postResult?.meta.changes === 1;
+      const draftUpdated = draftResult?.meta.changes === 1;
+      if (postUpdated && draftUpdated && savedDraft !== undefined) {
         return savedDraft;
+      }
+      if (postUpdated || draftUpdated || savedDraft !== undefined) {
+        throw new Error("Draft save statements returned a partial result");
       }
 
       const draft = await database
