@@ -770,7 +770,7 @@ describe("admin worker", () => {
               : {
                   "Content-Type": "application/json",
                   Origin: "https://localhost",
-                  ["X-TinyCMS-Request"]: "1",
+                  "X-TinyCMS-Request": "1",
                 }),
             ...init.headers,
           },

@@ -141,8 +141,8 @@ function defaultUuidv7(): string {
     bytes[index] = Number(timestamp & 0xffn);
     timestamp >>= 8n;
   }
-  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
   const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
@@ -250,7 +250,11 @@ function authorInput(identity: AccessIdentity, id: string, timestamp: number): C
 
 function slugFromTitle(title: string, postId: string): string {
   const fallback = `post-${postId.slice(0, 8)}-${postId.slice(9, 13)}`;
-  if (title.trim() === "" || /[^\x00-\x7f]/.test(title)) {
+  const containsNonAscii = [...title].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && codePoint > 0x7f;
+  });
+  if (title.trim() === "" || containsNonAscii) {
     return fallback;
   }
   const slug = title
