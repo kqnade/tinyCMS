@@ -93,14 +93,40 @@ describe("editor mutation body parsers", () => {
   });
 
   it("parses checkpoint and restore requests in their stable contract shape", () => {
-    expect(parseCheckpointPostRevisionRequest({ expectedDraftVersion: 7 })).toEqual({
+    expect(
+      parseCheckpointPostRevisionRequest({
+        expectedDraftVersion: 7,
+        expectedRevisionVersion: 6,
+      }),
+    ).toEqual({
       ok: true,
-      value: { expectedDraftVersion: 7 },
+      value: { expectedDraftVersion: 7, expectedRevisionVersion: 6 },
     });
-    expect(parseRestorePostRevisionRequest({ expectedDraftVersion: 8 })).toEqual({
+    expect(
+      parseRestorePostRevisionRequest({
+        expectedDraftVersion: 8,
+        expectedRevisionVersion: 7,
+      }),
+    ).toEqual({
       ok: true,
-      value: { expectedDraftVersion: 8 },
+      value: { expectedDraftVersion: 8, expectedRevisionVersion: 7 },
     });
+    expect(
+      JSON.stringify(
+        parseCheckpointPostRevisionRequest({
+          expectedDraftVersion: 7,
+          expectedRevisionVersion: 6,
+        }),
+      ),
+    ).toBe('{"ok":true,"value":{"expectedDraftVersion":7,"expectedRevisionVersion":6}}');
+    expect(
+      JSON.stringify(
+        parseRestorePostRevisionRequest({
+          expectedDraftVersion: 8,
+          expectedRevisionVersion: 7,
+        }),
+      ),
+    ).toBe('{"ok":true,"value":{"expectedDraftVersion":8,"expectedRevisionVersion":7}}');
 
     for (const expectedDraftVersion of [
       0,
@@ -124,6 +150,81 @@ describe("editor mutation body parsers", () => {
       },
     );
     expect(parseCheckpointPostRevisionRequest([])).toMatchObject({ ok: false });
+  });
+
+  it("rejects invalid values for either concurrency version", () => {
+    const invalidValues: unknown[] = [
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+      "1",
+      null,
+      true,
+      undefined,
+      1n,
+      Symbol("version"),
+      {},
+      [],
+    ];
+    const parsers = [parseCheckpointPostRevisionRequest, parseRestorePostRevisionRequest];
+
+    for (const parser of parsers) {
+      for (const key of ["expectedDraftVersion", "expectedRevisionVersion"] as const) {
+        for (const invalidValue of invalidValues) {
+          const input = {
+            expectedDraftVersion: 1,
+            expectedRevisionVersion: 1,
+            [key]: invalidValue,
+          };
+          const result = parser(input);
+          expect(result).toMatchObject({ ok: false });
+          expect(
+            result.ok ? false : result.issues.some((parseIssue) => parseIssue.path[0] === key),
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("reports missing concurrency fields with structured paths", () => {
+    expect(parseCheckpointPostRevisionRequest({})).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: ["expectedDraftVersion"],
+          code: "missing_key",
+          message: "Required property is missing.",
+        },
+        {
+          path: ["expectedRevisionVersion"],
+          code: "missing_key",
+          message: "Required property is missing.",
+        },
+      ],
+    });
+    expect(parseRestorePostRevisionRequest({ expectedDraftVersion: 1 })).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: ["expectedRevisionVersion"],
+          code: "missing_key",
+          message: "Required property is missing.",
+        },
+      ],
+    });
+    expect(parseCheckpointPostRevisionRequest({ expectedRevisionVersion: 1 })).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: ["expectedDraftVersion"],
+          code: "missing_key",
+          message: "Required property is missing.",
+        },
+      ],
+    });
   });
 
   it("parses a complete draft save without validating arbitrary content", () => {
@@ -285,6 +386,7 @@ describe("editor mutation body parsers", () => {
       { ...complete, content: undefined },
       { ...complete, metadata: undefined },
       { ...complete, metadata: [] },
+      { ...complete, expectedRevisionVersion: 1 },
       { ...complete, unknown: true },
     ] as unknown[]) {
       expect(parseSavePostDraftRequest(input)).toMatchObject({ ok: false });
@@ -358,6 +460,42 @@ describe("editor mutation body parsers", () => {
     ] as unknown[]) {
       expect(() => parseSavePostDraftRequest({ ...base, metadata })).not.toThrow();
       expect(parseSavePostDraftRequest({ ...base, metadata })).toMatchObject({ ok: false });
+    }
+  });
+
+  it("does not throw when concurrency fields or object traps cannot be read", () => {
+    const parsers = [parseCheckpointPostRevisionRequest, parseRestorePostRevisionRequest];
+    for (const key of ["expectedDraftVersion", "expectedRevisionVersion"] as const) {
+      const throwingGetter = Object.defineProperty(
+        {
+          expectedDraftVersion: 1,
+          expectedRevisionVersion: 1,
+        },
+        key,
+        {
+          enumerable: true,
+          get() {
+            throw new Error("blocked");
+          },
+        },
+      );
+      for (const parser of parsers) {
+        expect(() => parser(throwingGetter)).not.toThrow();
+        expect(parser(throwingGetter)).toMatchObject({ ok: false });
+      }
+    }
+
+    const ownKeysTrap = new Proxy(
+      { expectedDraftVersion: 1, expectedRevisionVersion: 1 },
+      {
+        ownKeys() {
+          throw new Error("blocked");
+        },
+      },
+    );
+    for (const parser of parsers) {
+      expect(() => parser(ownKeysTrap)).not.toThrow();
+      expect(parser(ownKeysTrap)).toMatchObject({ ok: false });
     }
   });
 

@@ -81,8 +81,14 @@ describe("editorial DTO contracts", () => {
       content: { type: "doc", content: [] },
       metadata: { seo: { description: "A greeting" } },
     };
-    const checkpointRequest: CheckpointPostRevisionRequest = { expectedDraftVersion: 4 };
-    const restoreRequest: RestorePostRevisionRequest = { expectedDraftVersion: 5 };
+    const checkpointRequest: CheckpointPostRevisionRequest = {
+      expectedDraftVersion: 4,
+      expectedRevisionVersion: 3,
+    };
+    const restoreRequest: RestorePostRevisionRequest = {
+      expectedDraftVersion: 5,
+      expectedRevisionVersion: 4,
+    };
 
     expect(JSON.stringify(revision)).toBe(
       '{"id":"0192f5a4-7b3c-7d1e-8f20-123456789abf","postId":"0192f5a4-7b3c-7d1e-8f20-123456789abc","revisionVersion":4,"title":"Hello, world","excerpt":"A greeting","authorId":"0192f5a4-7b3c-7d1e-8f20-123456789abe","createdAt":"2026-08-26T02:00:00.000Z","contentVersion":1,"content":{"type":"doc","content":[]},"metadata":{"seo":{"description":"A greeting"}}}',
@@ -100,6 +106,12 @@ describe("editorial DTO contracts", () => {
       checkpointRequest,
       restoreRequest,
     });
+    expect(JSON.stringify(checkpointRequest)).toBe(
+      '{"expectedDraftVersion":4,"expectedRevisionVersion":3}',
+    );
+    expect(JSON.stringify(restoreRequest)).toBe(
+      '{"expectedDraftVersion":5,"expectedRevisionVersion":4}',
+    );
   });
 
   it("serializes cursor pages and a post revision write result through response aliases", () => {

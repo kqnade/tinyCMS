@@ -109,10 +109,12 @@ export type SavePostDraftRequest = {
 
 export type CheckpointPostRevisionRequest = {
   expectedDraftVersion: number;
+  expectedRevisionVersion: number;
 };
 
 export type RestorePostRevisionRequest = {
   expectedDraftVersion: number;
+  expectedRevisionVersion: number;
 };
 
 export type PostRevisionWriteResultDto = {

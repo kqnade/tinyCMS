@@ -47,7 +47,10 @@ const SAVE_POST_DRAFT_KEYS = [
   "content",
   "metadata",
 ] as const;
-const EXPECTED_DRAFT_VERSION_KEYS = ["expectedDraftVersion"] as const;
+const EXPECTED_CONCURRENCY_VERSION_KEYS = [
+  "expectedDraftVersion",
+  "expectedRevisionVersion",
+] as const;
 
 export function parseUuidV7(input: unknown): ContractParseResult<UuidV7> {
   if (typeof input === "string" && UUID_V7_PATTERN.test(input)) {
@@ -235,13 +238,13 @@ export function parseCreatePostRequest(input: unknown): ContractParseResult<Crea
 export function parseCheckpointPostRevisionRequest(
   input: unknown,
 ): ContractParseResult<CheckpointPostRevisionRequest> {
-  return parseExpectedDraftVersionRequest<CheckpointPostRevisionRequest>(input);
+  return parseExpectedConcurrencyVersionRequest<CheckpointPostRevisionRequest>(input);
 }
 
 export function parseRestorePostRevisionRequest(
   input: unknown,
 ): ContractParseResult<RestorePostRevisionRequest> {
-  return parseExpectedDraftVersionRequest<RestorePostRevisionRequest>(input);
+  return parseExpectedConcurrencyVersionRequest<RestorePostRevisionRequest>(input);
 }
 
 export function parseSavePostDraftRequest(
@@ -562,15 +565,18 @@ function parseContentVersion(input: unknown): ContractParseResult<typeof EDITOR_
   };
 }
 
-function parseExpectedDraftVersionRequest<T extends { expectedDraftVersion: number }>(
-  input: unknown,
-): ContractParseResult<T> {
-  const inspection = inspectObject(input, EXPECTED_DRAFT_VERSION_KEYS);
+function parseExpectedConcurrencyVersionRequest<
+  T extends { expectedDraftVersion: number; expectedRevisionVersion: number },
+>(input: unknown): ContractParseResult<T> {
+  const inspection = inspectObject(input, EXPECTED_CONCURRENCY_VERSION_KEYS);
   if (!isObjectInspection(inspection)) {
     return { ok: false, issues: inspection };
   }
 
   const issues = [...inspection.issues];
+  let expectedDraftVersion: number | undefined;
+  let expectedRevisionVersion: number | undefined;
+
   if (!inspection.keys.includes("expectedDraftVersion")) {
     issues.push(issue(["expectedDraftVersion"], "missing_key", "Required property is missing."));
   } else {
@@ -579,6 +585,24 @@ function parseExpectedDraftVersionRequest<T extends { expectedDraftVersion: numb
       issues.push(
         issue(["expectedDraftVersion"], "invalid_value", "Property could not be read safely."),
       );
+    } else {
+      const parsed = parseExpectedDraftVersion(read.value);
+      if (!parsed.ok) {
+        appendIssues(issues, "expectedDraftVersion", parsed.issues);
+      } else {
+        expectedDraftVersion = parsed.value;
+      }
+    }
+  }
+
+  if (!inspection.keys.includes("expectedRevisionVersion")) {
+    issues.push(issue(["expectedRevisionVersion"], "missing_key", "Required property is missing."));
+  } else {
+    const read = readProperty(inspection.record, "expectedRevisionVersion");
+    if (!read.ok) {
+      issues.push(
+        issue(["expectedRevisionVersion"], "invalid_value", "Property could not be read safely."),
+      );
     } else if (
       typeof read.value !== "number" ||
       !Number.isSafeInteger(read.value) ||
@@ -586,20 +610,27 @@ function parseExpectedDraftVersionRequest<T extends { expectedDraftVersion: numb
     ) {
       issues.push(
         issue(
-          ["expectedDraftVersion"],
-          "invalid_expected_draft_version",
-          "Expected draft version must be a positive safe integer.",
+          ["expectedRevisionVersion"],
+          "invalid_expected_revision_version",
+          "Expected revision version must be a positive safe integer.",
         ),
       );
-    } else if (issues.length === 0) {
-      return {
-        ok: true,
-        value: { expectedDraftVersion: read.value } as T,
-      };
+    } else {
+      expectedRevisionVersion = read.value;
     }
   }
 
-  return { ok: false, issues };
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    value: {
+      expectedDraftVersion: expectedDraftVersion as number,
+      expectedRevisionVersion: expectedRevisionVersion as number,
+    } as T,
+  };
 }
 
 function parseExpectedDraftVersion(input: unknown): ContractParseResult<number> {
