@@ -21,6 +21,7 @@ import {
   createEditorContent,
   createEmptyEditorContent,
   type EditorContent,
+  isAbsoluteHttpUrl,
   parseEditorContent,
   type RawTiptapDoc,
   type RawTiptapNode,
@@ -49,6 +50,10 @@ const editorExtensions = [
     trailingNode: false,
     underline: false,
     heading: { levels: [1, 2, 3] },
+    link: {
+      isAllowedUri: (url) => isAbsoluteHttpUrl(url),
+      shouldAutoLink: (url) => isAbsoluteHttpUrl(url),
+    },
   }),
   ListKit.configure({
     bulletList: false,
@@ -358,7 +363,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
         } catch {
           return;
         }
-        if (!href) return;
+        if (!isAbsoluteHttpUrl(href)) return;
         chain.setLink({ href });
       }
     }

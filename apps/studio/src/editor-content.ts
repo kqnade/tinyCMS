@@ -75,6 +75,33 @@ export function setEditorContent(_content: EditorContent, content: RawTiptapDoc)
   return createEditorContent(content);
 }
 
+export function isAbsoluteHttpUrl(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.trim() !== value ||
+    hasUrlControlCharacter(value)
+  ) {
+    return false;
+  }
+  try {
+    const urlConstructor = (globalThis as unknown as { URL?: UrlConstructor }).URL;
+    if (urlConstructor === undefined) {
+      return false;
+    }
+    const url = new urlConstructor(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.hostname.length > 0 &&
+      url.username.length === 0 &&
+      url.password.length === 0 &&
+      !/^[a-z][a-z\d+.-]*:\/\/[^/?#]*@/i.test(value)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeEditorContent(input: unknown): EditorContentNormalizationResult {
   const context = new NormalizationContext();
   let value: EditorContent | undefined;
@@ -341,6 +368,14 @@ function normalizeMark(input: unknown, path: Path, context: NormalizationContext
         );
         return undefined;
       }
+      if (!isAbsoluteHttpUrl(attrs.href)) {
+        context.add(
+          [...path, "attrs", "href"],
+          "invalid_link_href",
+          "Link mark href must be an absolute HTTP(S) URL without credentials",
+        );
+        return undefined;
+      }
       return { type: "link", attrs: { href: attrs.href } } satisfies RawTiptapMark;
     }
 
@@ -451,4 +486,23 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
   if (input === null || typeof input !== "object") return false;
   const prototype = Object.getPrototypeOf(input);
   return prototype === Object.prototype || prototype === null;
+}
+
+type UrlConstructor = new (
+  value: string,
+) => {
+  readonly protocol: string;
+  readonly hostname: string;
+  readonly username: string;
+  readonly password: string;
+};
+
+function hasUrlControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
 }

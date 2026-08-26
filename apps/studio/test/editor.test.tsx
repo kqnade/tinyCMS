@@ -409,6 +409,51 @@ describe("StudioEditor", () => {
     expect(editorRef.current?.getContent()).toEqual(emitted);
   });
 
+  it("keeps invalid Link prompts as a mounted selection no-op", async () => {
+    installJsdomGeometry();
+    const content = createEditorContent({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Draft" }] }],
+    });
+    const editorRef = createRef<StudioEditorHandle>();
+    const onChange = vi.fn();
+    const prompt = vi.spyOn(window, "prompt");
+    render(<StudioEditor content={content} onChange={onChange} ref={editorRef} />);
+    const proseMirror = document.querySelector<HTMLElement>(".ProseMirror");
+    if (!proseMirror) throw new Error("Editor content is missing");
+    const text = proseMirror.querySelector("p")?.firstChild;
+    if (!text) throw new Error("Editor text is missing");
+
+    proseMirror.focus();
+    const range = document.createRange();
+    range.setStart(text, 4);
+    range.setEnd(text, 5);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+
+    const before = editorRef.current?.getContent();
+    for (const href of [
+      "javascript:alert(1)",
+      "/relative",
+      "https://[example.test",
+      "ftp://example.test/file",
+      "mailto:author@example.test",
+      "https://user:pass@example.test",
+      " https://example.test",
+      "https://example.test ",
+      "https://example.test/\u0001",
+    ]) {
+      prompt.mockReturnValueOnce(href);
+      fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    }
+
+    expect(editorRef.current?.getContent()).toEqual(before);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("opens a named slash menu after typing a slash", async () => {
     installJsdomGeometry();
     const user = userEvent.setup();

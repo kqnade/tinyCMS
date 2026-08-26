@@ -3,6 +3,7 @@ import {
   createEditorContent,
   createEmptyEditorContent,
   getEditorContent,
+  isAbsoluteHttpUrl,
   normalizeEditorContent,
   parseEditorContent,
   setEditorContent,
@@ -57,6 +58,90 @@ describe("Studio editor content", () => {
       }),
     ).toMatchObject({ ok: false });
   });
+
+  it.each([
+    ["javascript scheme", "javascript:alert(1)"],
+    ["relative URL", "/docs"],
+    ["malformed URL", "https://[example.test"],
+    ["ftp scheme", "ftp://example.test/file"],
+    ["mailto scheme", "mailto:author@example.test"],
+    ["credentials", "https://user:pass@example.test"],
+    ["leading whitespace", " https://example.test"],
+    ["trailing whitespace", "https://example.test "],
+    ["control character", "https://example.test/\u0001"],
+    ["delete character", "https://example.test/\u007f"],
+  ] as const)("rejects %s as a Studio link URL", (_label, href) => {
+    expect(isAbsoluteHttpUrl(href)).toBe(false);
+
+    const result = normalizeEditorContent({
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "Unsafe",
+                marks: [{ type: "link", attrs: { href } }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues[0]).toMatchObject({
+      code: "invalid_link_href",
+      path: ["content", "content", 0, "content", 0, "marks", 0, "attrs", "href"],
+    });
+  });
+
+  it.each(["https://example.test", "HTTPS://example.test/docs?tab=1#intro"])(
+    "accepts a canonical absolute HTTP(S) link URL: %s",
+    (href) => {
+      expect(isAbsoluteHttpUrl(href)).toBe(true);
+      expect(
+        normalizeEditorContent({
+          contentVersion: 1,
+          content: {
+            type: "doc",
+            content: [
+              {
+                type: "paragraph",
+                content: [
+                  {
+                    type: "text",
+                    text: "Safe",
+                    marks: [
+                      {
+                        type: "link",
+                        attrs: { href, target: "_blank", rel: "author" },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ).toEqual({
+        ok: true,
+        value: createEditorContent({
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Safe", marks: [{ type: "link", attrs: { href } }] }],
+            },
+          ],
+        }),
+      });
+    },
+  );
 
   it("accepts checked task items and canonical simple tables", () => {
     const document = {
