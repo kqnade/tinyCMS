@@ -53,6 +53,9 @@ export type DraftSessionOptions = {
 export type DraftSession = {
   readonly content: EditorContent;
   readonly draftVersion: number;
+  readonly getSnapshot: () => DraftSnapshot;
+  readonly hydrate: (snapshot: DraftSnapshot) => void;
+  readonly markSaveState: (state: DraftSaveState) => void;
   readonly save: () => Promise<void>;
   readonly saveState: DraftSaveState;
   readonly setContent: (content: EditorContent) => void;
@@ -141,6 +144,7 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
   const saveStateRef = useRef(saveState);
   const persistenceRef = useRef(options.persistence);
   const pendingSaveRef = useRef<Promise<void> | null>(null);
+  const saveGenerationRef = useRef(0);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const autosaveDelay = options.autosaveDelay ?? defaultAutosaveDelay;
@@ -187,6 +191,7 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
     }
 
     const snapshotAtRequest = snapshotRef.current;
+    const generationAtRequest = saveGenerationRef.current;
     const requestContent = cloneEditorContent(snapshotAtRequest.content);
     const request: DraftSaveRequest = {
       expectedDraftVersion: snapshotAtRequest.draftVersion,
@@ -203,6 +208,7 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
     const pending = Promise.resolve()
       .then(() => persistence.saveDraft(request))
       .then((result) => {
+        if (generationAtRequest !== saveGenerationRef.current) return;
         if (autosaveTimerRef.current !== null) {
           clearTimeout(autosaveTimerRef.current);
           autosaveTimerRef.current = null;
@@ -237,6 +243,7 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
         if (!unchanged) scheduleAutosave();
       })
       .catch(() => {
+        if (generationAtRequest !== saveGenerationRef.current) return;
         if (autosaveTimerRef.current !== null) {
           clearTimeout(autosaveTimerRef.current);
           autosaveTimerRef.current = null;
@@ -280,9 +287,53 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
     [scheduleAutosave, updateSnapshot, updateState],
   );
 
+  const getSnapshot = useCallback((): DraftSnapshot => {
+    const current = snapshotRef.current;
+    return {
+      content: cloneEditorContent(current.content),
+      draftVersion: current.draftVersion,
+      title: current.title,
+      ...(current.excerpt === undefined ? {} : { excerpt: current.excerpt }),
+      ...(current.metadata === undefined ? {} : { metadata: cloneJsonObject(current.metadata) }),
+    };
+  }, []);
+
+  const hydrate = useCallback(
+    (nextSnapshot: DraftSnapshot) => {
+      const hydrated: DraftSnapshot = {
+        content: cloneEditorContent(nextSnapshot.content),
+        draftVersion: assertDraftVersion(nextSnapshot.draftVersion),
+        title: nextSnapshot.title,
+        ...(nextSnapshot.excerpt === undefined ? {} : { excerpt: nextSnapshot.excerpt }),
+        ...(nextSnapshot.metadata === undefined
+          ? {}
+          : { metadata: cloneJsonObject(nextSnapshot.metadata) }),
+      };
+      saveGenerationRef.current += 1;
+      if (autosaveTimerRef.current !== null) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      pendingSaveRef.current = null;
+      updateSnapshot(hydrated);
+      updateState("saved");
+    },
+    [updateSnapshot, updateState],
+  );
+
+  const markSaveState = useCallback(
+    (nextState: DraftSaveState) => {
+      updateState(nextState);
+    },
+    [updateState],
+  );
+
   return {
     content: snapshot.content,
     draftVersion: snapshot.draftVersion,
+    getSnapshot,
+    hydrate,
+    markSaveState,
     save,
     saveState,
     setContent,

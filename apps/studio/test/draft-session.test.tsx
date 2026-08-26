@@ -8,6 +8,7 @@ import { App } from "../src/App";
 import {
   type DraftSaveRequest,
   type DraftSessionOptions,
+  type DraftSnapshot,
   useDraftSession,
 } from "../src/draft-session";
 import { createEditorContent, createEmptyEditorContent } from "../src/editor-content";
@@ -75,6 +76,21 @@ function DraftSessionProbe(options: DraftSessionOptions) {
       <button type="button" onClick={() => void session.save()}>
         Save draft
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          session.hydrate({
+            content: createEditorContent({
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Remote body" }] }],
+            }),
+            draftVersion: 7,
+            title: "Remote title",
+          } satisfies DraftSnapshot)
+        }
+      >
+        Hydrate session
+      </button>
       <output aria-label="Session title">{session.title}</output>
       <output aria-label="Session body">
         {session.content.content.content[0]?.content?.[0]?.text}
@@ -85,6 +101,20 @@ function DraftSessionProbe(options: DraftSessionOptions) {
 }
 
 describe("draft session", () => {
+  it("hydrates a remote snapshot and exposes a cloned local snapshot", async () => {
+    render(<DraftSessionProbe />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Update title" }));
+    const localSnapshot = screen.getByRole("status", { name: "Session title" });
+    expect(localSnapshot.textContent).toBe("Updated title");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate session" }));
+
+    expect(screen.getByRole("status", { name: "Session title" }).textContent).toBe("Remote title");
+    expect(screen.getByRole("status", { name: "Session body" }).textContent).toBe("Remote body");
+    expect(screen.getByRole("status", { name: "Session status" }).textContent).toBe("saved");
+  });
+
   it("autosaves a dirty title with the canonical content and advances the draft version", async () => {
     const saveDraft = vi.fn(
       async (
