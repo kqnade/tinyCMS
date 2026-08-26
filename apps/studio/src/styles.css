@@ -127,6 +127,23 @@ input[readonly] {
   background: var(--muted-foreground);
 }
 
+.studio-status-dot--dirty {
+  background: #b45309;
+}
+
+.studio-status-dot--saving {
+  background: #2563eb;
+}
+
+.studio-status-dot--saved {
+  background: #15803d;
+}
+
+.studio-status-dot--conflict,
+.studio-status-dot--error {
+  background: var(--danger);
+}
+
 .studio-icon-button.ui-button {
   width: 2.25rem;
   min-height: 2.25rem;
@@ -159,8 +176,7 @@ input[readonly] {
   background: var(--surface);
 }
 
-.studio-title-input,
-.studio-body-input {
+.studio-title-input {
   width: 100%;
   border: 0;
   border-radius: 0;
@@ -178,15 +194,218 @@ input[readonly] {
   font-weight: var(--font-weight-regular);
 }
 
-.studio-body-input {
+.studio-body-editor {
   min-height: 70vh;
   flex: 1;
   margin-top: var(--space-6);
+}
+
+.ui-card p {
+  margin: var(--space-3) 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-relaxed);
+}
+
+.studio-body-editor .ProseMirror {
+  min-height: 70vh;
   padding: 0;
-  resize: none;
-  font-family: var(--font-sans);
+  color: var(--foreground);
   font-size: clamp(1.0625rem, 1.5vw, 1.1875rem);
   line-height: 1.9;
+  outline: 0;
+}
+
+.studio-body-editor .ProseMirror:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.studio-body-editor .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.studio-body-editor .ProseMirror p,
+.studio-body-editor .ProseMirror h1,
+.studio-body-editor .ProseMirror h2,
+.studio-body-editor .ProseMirror h3,
+.studio-body-editor .ProseMirror blockquote,
+.studio-body-editor .ProseMirror pre,
+.studio-body-editor .ProseMirror ul,
+.studio-body-editor .ProseMirror ol,
+.studio-body-editor .ProseMirror table {
+  margin-block: 1.1em;
+}
+
+.studio-body-editor .ProseMirror h1,
+.studio-body-editor .ProseMirror h2,
+.studio-body-editor .ProseMirror h3 {
+  line-height: var(--line-height-snug);
+}
+
+.studio-body-editor .ProseMirror h1 {
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+}
+
+.studio-body-editor .ProseMirror h2 {
+  font-size: clamp(1.4rem, 3vw, 1.75rem);
+}
+
+.studio-body-editor .ProseMirror h3 {
+  font-size: 1.25rem;
+}
+
+.studio-body-editor .ProseMirror ul,
+.studio-body-editor .ProseMirror ol {
+  padding-inline-start: 1.5em;
+}
+
+.studio-body-editor .ProseMirror ul[data-type="taskList"] {
+  padding: 0;
+  list-style: none;
+}
+
+.studio-body-editor .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.studio-body-editor .ProseMirror ul[data-type="taskList"] li > label {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 0.5em;
+}
+
+.studio-body-editor .ProseMirror ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+
+.studio-body-editor .ProseMirror blockquote {
+  margin-inline: 0;
+  padding-inline-start: var(--space-4);
+  border-inline-start: 3px solid var(--border-strong);
+  color: var(--muted-foreground);
+}
+
+.studio-body-editor .ProseMirror pre {
+  overflow-x: auto;
+  padding: var(--space-3) var(--space-4);
+  border-inline-start: 3px solid var(--border-strong);
+  background: var(--surface-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-relaxed);
+}
+
+.studio-body-editor .ProseMirror code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.studio-body-editor .ProseMirror :not(pre) > code {
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.studio-body-editor .ProseMirror hr {
+  margin-block: 2.5em;
+  border: 0;
+  border-top: 1px solid var(--border-strong);
+}
+
+.studio-body-editor .ProseMirror table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-md);
+}
+
+.studio-body-editor .ProseMirror th,
+.studio-body-editor .ProseMirror td {
+  min-width: 5rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  text-align: start;
+  vertical-align: top;
+}
+
+.studio-body-editor .ProseMirror th {
+  background: var(--surface-muted);
+  font-weight: var(--font-weight-semibold);
+}
+
+.studio-body-editor .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+}
+
+.studio-editor-formatting {
+  position: absolute;
+  z-index: 10;
+  top: -2.75rem;
+  left: 0;
+  display: flex;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.studio-editor-format-button {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.studio-editor-format-button:hover,
+.studio-editor-format-button[aria-pressed="true"] {
+  background: var(--surface-muted);
+}
+
+.studio-editor-format-button:focus-visible,
+.studio-editor-slash-menu:focus-visible,
+.studio-editor-slash-option:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.studio-editor-format-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.studio-editor-slash-menu {
+  min-width: 12rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.studio-editor-slash-option {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+}
+
+.studio-editor-slash-option[aria-selected="true"],
+.studio-editor-slash-option:hover {
+  background: var(--surface-muted);
 }
 
 .ui-field {
@@ -341,13 +560,6 @@ input[readonly] {
   box-shadow: none;
 }
 
-.ui-card p {
-  margin: var(--space-3) 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--font-size-md);
-  line-height: var(--line-height-relaxed);
-}
-
 .ui-card .ui-button {
   margin-top: var(--space-4);
 }
@@ -482,7 +694,7 @@ input[readonly] {
     padding-inline: var(--space-2);
   }
 
-  .studio-body-input {
+  .studio-body-editor .ProseMirror {
     font-size: var(--font-size-base);
   }
 }
