@@ -31,6 +31,7 @@ The authoring path is usable after deployment behind Cloudflare Access. Publicat
 mise trust
 mise install
 mise run install
+pnpm build
 cd apps/admin-worker
 mise exec -- wrangler d1 migrations apply CMS_DB --local
 cd ../..
