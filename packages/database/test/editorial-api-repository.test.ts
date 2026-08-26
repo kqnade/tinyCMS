@@ -73,23 +73,25 @@ describe("editorial API repository", () => {
       ["a", 1_700_000_021_001],
       ["b", 1_700_000_021_002],
       ["c", 1_700_000_021_003],
+      ["d", 1_700_000_021_000],
     ] as const) {
+      const numericSuffix = { a: "1", b: "2", c: "3", d: "4" }[suffix];
       await repository.createPostWithAuthor({
         author: {
-          id: `0192f5a4-7b3c-7d1e-8f20-00000000001${suffix === "a" ? "1" : suffix === "b" ? "2" : "3"}`,
+          id: `0192f5a4-7b3c-7d1e-8f20-00000000001${numericSuffix}`,
           accessSubject: `access-subject-list-${suffix}`,
           displayName: `List ${suffix}`,
           createdAt: timestamp,
           updatedAt: timestamp,
         },
         post: {
-          id: `0192f5a4-7b3c-7d1e-8f20-00000000002${suffix === "a" ? "1" : suffix === "b" ? "2" : "3"}`,
+          id: `0192f5a4-7b3c-7d1e-8f20-00000000002${numericSuffix}`,
           slug: `list-${suffix}`,
           createdAt: timestamp,
           updatedAt: timestamp,
         },
         revision: {
-          id: `0192f5a4-7b3c-7d1e-8f20-00000000003${suffix === "a" ? "1" : suffix === "b" ? "2" : "3"}`,
+          id: `0192f5a4-7b3c-7d1e-8f20-00000000003${numericSuffix}`,
           version: 1,
           title: `List ${suffix}`,
           contentVersion: 1,
@@ -110,7 +112,7 @@ describe("editorial API repository", () => {
       afterUpdatedAt: lastPost.updatedAt,
       afterId: lastPost.id,
     });
-    expect(secondPage.map((post) => post.slug)).toEqual(["list-a", "author-reuse-second"]);
+    expect(secondPage.map((post) => post.slug)).toEqual(["list-a", "list-d"]);
 
     const revisions = await repository.listRevisions({
       postId: "0192f5a4-7b3c-7d1e-8f20-000000000023",
