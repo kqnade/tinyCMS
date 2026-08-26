@@ -690,7 +690,38 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     updatedAt,
   }: RestoreDraftInput): Promise<RestoredDraft> => {
     try {
-      const [revisionResult, draftResult] = await database.batch([
+      const [postResult, revisionResult, draftResult] = await database.batch([
+        database
+          .prepare(
+            `UPDATE posts
+             SET updated_at = ?
+             WHERE id = ?
+               AND EXISTS (
+                 SELECT 1
+                 FROM post_revisions AS source
+                 JOIN post_drafts AS draft ON draft.post_id = source.post_id
+                 JOIN (
+                   SELECT post_id, MAX(version) AS version
+                   FROM post_revisions
+                   WHERE post_id = ?
+                   GROUP BY post_id
+                 ) AS current ON current.post_id = source.post_id
+                 WHERE source.post_id = posts.id
+                   AND source.id = ?
+                   AND source.post_id = ?
+                   AND draft.version = ?
+                   AND current.version = ?
+               )`,
+          )
+          .bind(
+            updatedAt,
+            postId,
+            postId,
+            sourceRevisionId,
+            postId,
+            expectedDraftVersion,
+            expectedRevisionVersion,
+          ),
         database
           .prepare(
             `INSERT INTO post_revisions (
@@ -757,12 +788,27 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
           )
           .bind(authorId, updatedAt, postId, expectedDraftVersion, revisionId, postId),
       ]);
+      const postUpdated = postResult?.meta.changes === 1;
       const restoredRevision = revisionResult?.results[0] as PostRevision | undefined;
       const restoredDraft = draftResult?.results[0] as PostDraft | undefined;
-      if (restoredRevision !== undefined && restoredDraft !== undefined) {
+      const revisionInserted = revisionResult?.meta.changes === 1;
+      const draftUpdated = draftResult?.meta.changes === 1;
+      if (
+        postUpdated &&
+        revisionInserted &&
+        restoredRevision !== undefined &&
+        draftUpdated &&
+        restoredDraft !== undefined
+      ) {
         return { draft: restoredDraft, revision: restoredRevision };
       }
-      if (restoredRevision !== undefined || restoredDraft !== undefined) {
+      if (
+        postUpdated ||
+        revisionInserted ||
+        restoredRevision !== undefined ||
+        draftUpdated ||
+        restoredDraft !== undefined
+      ) {
         throw new Error("Restore statements returned a partial result");
       }
 

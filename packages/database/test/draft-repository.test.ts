@@ -991,6 +991,9 @@ describe("editorial repository drafts", () => {
         updatedAt: 1_700_000_011_010,
       },
     });
+    await expect(repository.getPost(initial.post.id)).resolves.toMatchObject({
+      updatedAt: 1_700_000_011_010,
+    });
 
     const aggregate = await repository.getPostAggregate(initial.post.id);
     expect(aggregate.revisions).toEqual([...revisionsBeforeRestore.revisions, restored.revision]);
@@ -1286,6 +1289,9 @@ describe("editorial repository drafts", () => {
     await env.TEST_DB.prepare("DELETE FROM post_drafts WHERE post_id = ?")
       .bind(target.post.id)
       .run();
+    const targetAggregateBeforeMissingDraftRestore = await repository.getPostAggregate(
+      target.post.id,
+    );
     await expect(
       repository.restoreDraft({
         postId: target.post.id,
@@ -1301,6 +1307,9 @@ describe("editorial repository drafts", () => {
       code: RepositoryErrorCode.NOT_FOUND,
       message: "post draft was not found",
     });
+    await expect(repository.getPostAggregate(target.post.id)).resolves.toEqual(
+      targetAggregateBeforeMissingDraftRestore,
+    );
   });
 
   it("maps an unexpected restore batch failure to a stable write error", async () => {
@@ -1338,7 +1347,7 @@ describe("editorial repository drafts", () => {
     expect((error as RepositoryError).message).not.toMatch(/INSERT|post_revisions|SQL/i);
   });
 
-  it("rolls back a restore when the draft update violates a database constraint", async () => {
+  it("rolls back a restore when a later statement violates a database constraint", async () => {
     const repository = createEditorialRepository(env.TEST_DB);
     const initial = await repository.createAuthorPostRevision({
       author: {
@@ -1379,9 +1388,9 @@ describe("editorial repository drafts", () => {
         expectedDraftVersion: beforeDraft.version,
         expectedRevisionVersion: initial.revision.version,
         revisionId: restoredRevisionId,
-        authorId: initial.author.id,
+        authorId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff35",
         createdAt: 1_700_000_011_503,
-        updatedAt: -1,
+        updatedAt: 1_700_000_011_504,
       }),
     ).rejects.toMatchObject({
       code: RepositoryErrorCode.WRITE_FAILED,
