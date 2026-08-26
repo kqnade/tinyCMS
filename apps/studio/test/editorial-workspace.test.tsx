@@ -9,6 +9,7 @@ import {
   type PostRevisionDto,
   type PostRevisionListItemDto,
 } from "@tinycms/contracts";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { type EditorialApi, EditorialApiError } from "../src/editorial-api";
@@ -268,6 +269,23 @@ describe("Studio editorial workspace", () => {
       expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
         "First post",
       ),
+    );
+  });
+
+  it("exits startup loading when a Strict Mode workspace request fails", async () => {
+    const api = createMockApi({
+      listPosts: vi.fn<EditorialApi["listPosts"]>(async () => {
+        throw new Error("temporary failure");
+      }),
+    });
+    render(
+      <StrictMode>
+        <App api={api} />
+      </StrictMode>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "Workspace unavailable" })).toBeTruthy(),
     );
   });
 

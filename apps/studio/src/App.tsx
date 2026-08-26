@@ -349,6 +349,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
     });
     return () => {
       active = false;
+      if (startedApiRef.current === api) startedApiRef.current = null;
     };
   }, [api, loadWorkspace]);
 
