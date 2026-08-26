@@ -61,6 +61,18 @@ export interface CreateRevisionInput {
   createdAt: number;
 }
 
+export interface SaveDraftInput {
+  postId: string;
+  expectedDraftVersion: number;
+  authorId: string;
+  title: string;
+  contentVersion: number;
+  contentJson: string;
+  excerpt?: string | null;
+  metadataJson?: string;
+  updatedAt: number;
+}
+
 export interface AppendRevisionInput {
   postId: string;
   authorId: string;
@@ -100,6 +112,7 @@ export interface EditorialRepository {
   ): Promise<CreatedAuthorPostRevision>;
   appendRevision(input: AppendRevisionInput): Promise<PostRevision>;
   restoreRevision(input: RestoreRevisionInput): Promise<PostRevision>;
+  saveDraft(input: SaveDraftInput): Promise<PostDraft>;
   getAuthor(id: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
@@ -149,6 +162,69 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       db.select().from(postDrafts).where(eq(postDrafts.postId, postId)).limit(1),
       "post draft",
     );
+
+  const saveDraft = async ({
+    postId,
+    expectedDraftVersion,
+    authorId,
+    title,
+    contentVersion,
+    contentJson,
+    excerpt,
+    metadataJson,
+    updatedAt,
+  }: SaveDraftInput): Promise<PostDraft> => {
+    try {
+      const result = await database
+        .prepare(
+          `UPDATE post_drafts
+           SET title = ?, content_version = ?, content_json = ?, excerpt = ?,
+             metadata_json = ?, author_id = ?, updated_at = ?, version = version + 1
+           WHERE post_id = ? AND version = ?
+           RETURNING post_id AS "postId", version, title,
+             content_version AS "contentVersion", content_json AS "contentJson",
+             excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+             updated_at AS "updatedAt"`,
+        )
+        .bind(
+          title,
+          contentVersion,
+          contentJson,
+          excerpt ?? null,
+          metadataJson ?? "{}",
+          authorId,
+          updatedAt,
+          postId,
+          expectedDraftVersion,
+        )
+        .all<PostDraft>();
+      const savedDraft = result.results[0];
+      if (savedDraft !== undefined) {
+        return savedDraft;
+      }
+
+      const draft = await database
+        .prepare('SELECT post_id AS "postId" FROM post_drafts WHERE post_id = ?')
+        .bind(postId)
+        .first<{ postId: string }>();
+      if (draft === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post draft was not found");
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.CONFLICT,
+        "Draft save conflicted with a newer version",
+      );
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to save post draft",
+        cause,
+      );
+    }
+  };
 
   const searchChunksByQuery = async (query: string): Promise<SearchChunk[]> => {
     const normalized = query.trim();
@@ -464,6 +540,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     createAuthorPostRevision,
     appendRevision,
     restoreRevision,
+    saveDraft,
     getAuthor,
     getPost,
     getPostBySlug,
