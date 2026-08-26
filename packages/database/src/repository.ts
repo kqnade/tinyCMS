@@ -161,6 +161,7 @@ export interface EditorialRepository {
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
   getRevision(id: string): Promise<PostRevision>;
+  getLatestRevisionVersion(postId: string): Promise<number | null>;
   getDraft(postId: string): Promise<PostDraft>;
   getPostAggregate(id: string): Promise<PostAggregate>;
   listPosts(input: PostListInput): Promise<Post[]>;
@@ -243,6 +244,22 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       db.select().from(postRevisions).where(eq(postRevisions.id, id)).limit(1),
       "post revision",
     );
+
+  const getLatestRevisionVersion = async (postId: string): Promise<number | null> => {
+    try {
+      const result = await database
+        .prepare("SELECT MAX(version) AS version FROM post_revisions WHERE post_id = ?")
+        .bind(postId)
+        .first<{ version: number | null }>();
+      return result?.version ?? null;
+    } catch (cause) {
+      throw new RepositoryError(
+        RepositoryErrorCode.READ_FAILED,
+        "Failed to read latest post revision version",
+        cause,
+      );
+    }
+  };
 
   const getDraft = (postId: string): Promise<PostDraft> =>
     readOne(
@@ -1131,6 +1148,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     getPost,
     getPostBySlug,
     getRevision,
+    getLatestRevisionVersion,
     getDraft,
     getPostAggregate,
     listPosts,

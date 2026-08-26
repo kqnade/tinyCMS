@@ -20,7 +20,6 @@ import {
   type CreatePostWithAuthorInput,
   type CreatedAuthorPostRevision,
   type CheckpointDraftInput,
-  type PostAggregate,
   RepositoryError,
   RepositoryErrorCode,
   type Post,
@@ -70,7 +69,7 @@ export interface EditorialRepositoryPort {
   restoreDraft(input: RestoreDraftInput): Promise<{ draft: PostDraft; revision: PostRevision }>;
   getPost(id: string): Promise<Post>;
   getDraft(postId: string): Promise<PostDraft>;
-  getPostAggregate(id: string): Promise<PostAggregate>;
+  getLatestRevisionVersion(postId: string): Promise<number | null>;
   listPosts(input: { limit: number; afterUpdatedAt?: number; afterId?: string }): Promise<Post[]>;
   listRevisions(input: {
     postId: string;
@@ -282,12 +281,7 @@ function mapRevision(revision: PostRevision): PostRevisionDto {
   };
 }
 
-function mapPost(post: Post, draft: PostDraft, revisions: readonly PostRevision[]): PostDto {
-  const currentRevisionVersion = revisions.reduce<number | null>(
-    (highest, revision) =>
-      highest === null || revision.version > highest ? revision.version : highest,
-    null,
-  );
+function mapPost(post: Post, draft: PostDraft, currentRevisionVersion: number | null): PostDto {
   return {
     id: post.id,
     slug: post.slug,
@@ -309,9 +303,9 @@ function mapPost(post: Post, draft: PostDraft, revisions: readonly PostRevision[
 function mapPostListItem(
   post: Post,
   draft: PostDraft,
-  revisions: readonly PostRevision[],
+  currentRevisionVersion: number | null,
 ): PostListItemDto {
-  const mapped = mapPost(post, draft, revisions);
+  const mapped = mapPost(post, draft, currentRevisionVersion);
   return {
     id: mapped.id,
     slug: mapped.slug,
@@ -353,6 +347,7 @@ function decodeCursor(input: string, kind: "posts" | "revisions"): PostCursor | 
       if (
         typeof record.updatedAt !== "number" ||
         !Number.isSafeInteger(record.updatedAt) ||
+        record.updatedAt < 0 ||
         typeof record.id !== "string" ||
         !parseUuidV7(record.id).ok
       ) {
@@ -392,8 +387,8 @@ export function createEditorialApplication(
     withRepositoryErrors(async () => {
       const post = await repository.getPost(postId);
       const draft = await repository.getDraft(postId);
-      const aggregate = await repository.getPostAggregate(postId);
-      return mapPost(post, draft, aggregate.revisions);
+      const currentRevisionVersion = await repository.getLatestRevisionVersion(postId);
+      return mapPost(post, draft, currentRevisionVersion);
     });
 
   const ensureAuthor = (identity: AccessIdentity, timestamp: number): Promise<Author> =>
@@ -446,7 +441,7 @@ export function createEditorialApplication(
           authorId: created.author.id,
           updatedAt: created.revision.createdAt,
         },
-        [created.revision],
+        created.revision.version,
       );
     });
   };
@@ -478,8 +473,8 @@ export function createEditorialApplication(
         updatedAt: timestamp,
       });
       const post = await repository.getPost(postId);
-      const aggregate = await repository.getPostAggregate(postId);
-      return mapPost(post, saved, aggregate.revisions);
+      const currentRevisionVersion = await repository.getLatestRevisionVersion(postId);
+      return mapPost(post, saved, currentRevisionVersion);
     });
   };
 
@@ -541,10 +536,10 @@ export function createEditorialApplication(
     const pageRows = hasNext ? rows.slice(0, limit) : rows;
     const items = await Promise.all(
       pageRows.map(async (post) => {
-        const [draft, aggregate] = await withRepositoryErrors(() =>
-          Promise.all([repository.getDraft(post.id), repository.getPostAggregate(post.id)]),
+        const [draft, currentRevisionVersion] = await withRepositoryErrors(() =>
+          Promise.all([repository.getDraft(post.id), repository.getLatestRevisionVersion(post.id)]),
         );
-        return mapPostListItem(post, draft, aggregate.revisions);
+        return mapPostListItem(post, draft, currentRevisionVersion);
       }),
     );
     const last = pageRows.at(-1);

@@ -70,9 +70,9 @@ function createRepositoryStub(
       void input;
       return unavailable("getDraft");
     },
-    getPostAggregate: async (input) => {
+    getLatestRevisionVersion: async (input) => {
       void input;
-      return unavailable("getPostAggregate");
+      return unavailable("getLatestRevisionVersion");
     },
     listPosts: async (input) => {
       void input;
