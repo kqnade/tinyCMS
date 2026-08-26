@@ -1,6 +1,6 @@
 # Contributing
 
-tinyCMS is in its foundation stage. Keep changes focused on an agreed behavior and avoid adding Cloudflare products, abstractions, or compatibility layers before they are needed.
+tinyCMS is under active development. Keep changes focused on an agreed behavior and avoid adding Cloudflare products, abstractions, or compatibility layers before they are needed.
 
 ## Setup
 

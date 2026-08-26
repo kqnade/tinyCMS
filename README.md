@@ -2,23 +2,26 @@
 
 tinyCMS is an edge-native, single-site publishing system for Cloudflare. It aims to combine a low-friction authoring experience with a quiet, readable public blog.
 
-The repository currently provides a runnable development foundation:
+The repository currently provides the editorial core:
 
 - separate Hono Workers for public and administrative traffic;
-- a React and Vite Studio shell;
-- shared HTTP response contracts;
-- tests running in Cloudflare's local `workerd` runtime;
+- a focused React, Vite, and Tiptap writing Studio;
+- Access-protected post, draft, checkpoint, and revision APIs;
+- D1-backed optimistic draft saves and immutable revision history;
+- Studio assets deployed with the Admin Worker;
+- shared content validation, rendering, and HTTP contracts;
+- end-to-end tests running against Cloudflare's local `workerd` and D1 runtime;
 - strict TypeScript, Biome, pinned mise tools, Renovate, and least-privilege CI.
 
-It is not yet a usable CMS. Storage bindings, editorial workflows, publishing, search, likes, and AI assistance remain to be implemented. The planned scope and security model are recorded in the [design snapshot](.dev/designdoc/tinycms.md).
+The authoring path is usable after deployment behind Cloudflare Access. Publication, media, public reading, search, likes, and AI assistance remain to be implemented. The planned scope and security model are recorded in the [design snapshot](.dev/designdoc/tinycms.md).
 
 ## Applications
 
 | Application | Local URL | Current behavior |
 | --- | --- | --- |
 | Public Worker | `http://127.0.0.1:8787` | Hono health endpoint and public-only routing boundary |
-| Admin Worker | `http://127.0.0.1:8788` | Hono health endpoint protected by host fencing and Access JWT verification |
-| Studio | `http://127.0.0.1:5173` | React application shell with light and dark themes |
+| Admin Worker | `http://127.0.0.1:8788` | Access-protected editorial API and built Studio assets |
+| Studio | `http://127.0.0.1:5173` | Focused editor development server; authenticated API requests are not proxied |
 
 ## Development
 
@@ -28,6 +31,9 @@ It is not yet a usable CMS. Storage bindings, editorial workflows, publishing, s
 mise trust
 mise install
 mise run install
+cd apps/admin-worker
+mise exec -- wrangler d1 migrations apply CMS_DB --local
+cd ../..
 mise run dev
 ```
 
@@ -39,6 +45,15 @@ curl -i -H 'Host: localhost' http://127.0.0.1:8788/healthz
 ```
 
 The public request returns the health response. The Admin Worker fails closed with the tracked local defaults, so the admin request returns `401` with `AUTH_REQUIRED` until it receives a valid `Cf-Access-Jwt-Assertion` header and valid Access configuration.
+
+The standalone Vite server is useful for Studio UI development. A production build serves the Studio from the Admin Worker through Workers Static Assets:
+
+```sh
+pnpm build
+pnpm --dir apps/admin-worker dev
+```
+
+The local Admin Worker deliberately has no authentication bypass. Its API integration tests use signed Access fixtures; use an isolated Cloudflare staging deployment behind Access for an interactive end-to-end authoring session.
 
 Run the complete local quality gate with:
 
@@ -58,6 +73,7 @@ mise exec -- wrangler types --include-runtime false
 
 The Admin Worker requires these non-secret variables:
 
+- `ADMIN_HOST`: the exact canonical administration hostname;
 - `ACCESS_TEAM_DOMAIN`: the bare Cloudflare Access hostname, such as `team.cloudflareaccess.com`, without a scheme, path, or port;
 - `ACCESS_AUD`: the exact application audience tag, which must be present in the verified token's `aud` claim.
 
@@ -75,10 +91,13 @@ apps/
   public-worker/
   studio/
 packages/
+  application/
+  content/
   contracts/
+  database/
 ```
 
-Additional package boundaries will be introduced with the behavior that needs them. See [CONTRIBUTING.md](CONTRIBUTING.md) for development rules and [SECURITY.md](SECURITY.md) for the current security boundary.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development rules and [SECURITY.md](SECURITY.md) for the current security boundary.
 
 ## License
 
