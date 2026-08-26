@@ -894,7 +894,12 @@ describe("admin worker", () => {
     const rowsBeforeDuplicate = await countRows();
     const duplicateSlugResponse = await request("/api/v1/admin/posts", {
       method: "POST",
-      body: JSON.stringify({ title: "Round trip", contentVersion: 1, content: document }),
+      body: JSON.stringify({
+        slug: "round-trip",
+        title: "A different title",
+        contentVersion: 1,
+        content: document,
+      }),
     });
     expect(duplicateSlugResponse.status).toBe(409);
     expect(await duplicateSlugResponse.json()).toMatchObject({ error: { code: "CONFLICT" } });
