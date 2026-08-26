@@ -39,8 +39,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/database
       hono:
-        specifier: 4.13.2
-        version: 4.13.2
+        specifier: 4.13.4
+        version: 4.13.4
 
   apps/public-worker:
     dependencies:
@@ -48,8 +48,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/contracts
       hono:
-        specifier: 4.13.2
-        version: 4.13.2
+        specifier: 4.13.4
+        version: 4.13.4
 
   apps/studio:
     dependencies:
@@ -1357,8 +1357,8 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  hono@4.13.2:
-    resolution: {integrity: sha512-JydRilDRkYBQMt9qR9U92mXxmbGqsqSn/IKOrh4e7/gEbn+0zSr8igTu0obwJoNGN4sez28DIql7FBHWydoJpA==}
+  hono@4.13.4:
+    resolution: {integrity: sha512-AGEwKIyRMHRv1t8Wjwa3LHxQ61X5CqrdFT+4BRNTpqS5aJNnpl5WLjADb7vFlJzI/8uK7T5QLVApCMQKNa3LgQ==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@6.0.0:
@@ -2691,7 +2691,7 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  hono@4.13.2: {}
+  hono@4.13.4: {}
 
   html-encoding-sniffer@6.0.0:
     dependencies:
