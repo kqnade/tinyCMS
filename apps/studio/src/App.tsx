@@ -1,7 +1,11 @@
 import { type ReactNode, useState } from "react";
+import { type DraftSaveState, type DraftSessionOptions, useDraftSession } from "./draft-session";
+import { StudioEditor } from "./editor";
 import { Button } from "./ui";
 
 type IconName = "document" | "image" | "menu" | "publish" | "save" | "settings" | "sparkle";
+
+export type AppProps = DraftSessionOptions;
 
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, ReactNode> = {
@@ -58,8 +62,35 @@ function Icon({ name }: { name: IconName }) {
   );
 }
 
-export function App() {
+const statusLabels: Record<DraftSaveState, string> = {
+  conflict: "Conflict",
+  dirty: "Dirty",
+  error: "Error",
+  saved: "Saved",
+  saving: "Saving",
+};
+
+export function App({
+  initialContent,
+  initialDraftVersion,
+  initialTitle,
+  persistence,
+  autosaveDelay,
+}: AppProps) {
   const [panelOpen, setPanelOpen] = useState(false);
+  const session = useDraftSession({
+    ...(autosaveDelay === undefined ? {} : { autosaveDelay }),
+    ...(initialContent === undefined ? {} : { initialContent }),
+    ...(initialDraftVersion === undefined ? {} : { initialDraftVersion }),
+    ...(initialTitle === undefined ? {} : { initialTitle }),
+    ...(persistence === undefined ? {} : { persistence }),
+  });
+  const canSave =
+    Boolean(persistence) &&
+    (session.saveState === "dirty" ||
+      session.saveState === "conflict" ||
+      session.saveState === "error");
+  const statusLabel = statusLabels[session.saveState];
 
   return (
     <div className="studio-shell" data-panel-open={panelOpen}>
@@ -76,8 +107,19 @@ export function App() {
         </Button>
 
         <div className="studio-document-actions">
-          <span aria-label="Draft" className="studio-status-dot" role="status" />
-          <Button aria-label="Save" className="studio-icon-button" disabled variant="ghost">
+          <span
+            aria-label={statusLabel}
+            className={`studio-status-dot studio-status-dot--${session.saveState}`}
+            data-save-state={session.saveState}
+            role="status"
+          />
+          <Button
+            aria-label="Save"
+            className="studio-icon-button"
+            disabled={!canSave}
+            onClick={() => void session.save()}
+            variant="ghost"
+          >
             <Icon name="save" />
           </Button>
           <Button aria-label="Publish" className="studio-icon-button" disabled variant="ghost">
@@ -110,8 +152,19 @@ export function App() {
 
       <main className="studio-main">
         <section className="studio-editor" aria-label="Editor">
-          <input aria-label="Title" className="studio-title-input" disabled type="text" />
-          <textarea aria-label="Body" className="studio-body-input" disabled rows={24} />
+          <input
+            aria-label="Title"
+            className="studio-title-input"
+            onChange={(event) => session.setTitle(event.target.value)}
+            type="text"
+            value={session.title}
+          />
+          <StudioEditor
+            aria-label="Body"
+            className="studio-body-editor"
+            initialContent={session.content}
+            onChange={session.setContent}
+          />
         </section>
       </main>
     </div>

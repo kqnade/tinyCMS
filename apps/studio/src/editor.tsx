@@ -306,7 +306,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
   );
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || content === undefined) return;
 
     const nextContent = cloneEditorContent(resolvedContent);
     if (JSON.stringify(getCanonicalContent(editor)) === JSON.stringify(nextContent)) return;
@@ -314,7 +314,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
     editor.commands.setContent(toTiptapDocument(nextContent.document), { emitUpdate: false });
     setSlashState(null);
     setSlashIndex(0);
-  }, [editor, resolvedContent]);
+  }, [content, editor, resolvedContent]);
 
   useImperativeHandle(
     ref,

@@ -15,8 +15,8 @@ describe("Studio writing surface", () => {
 
     expect(markup).toContain("<main");
     expect(markup).toContain('<section class="studio-editor" aria-label="Editor">');
-    expect(markup).toMatch(/<input[^>]+aria-label="Title"[^>]+disabled=""/);
-    expect(markup).toMatch(/<textarea[^>]+aria-label="Body"[^>]+disabled=""/);
+    expect(markup).toMatch(/<input[^>]+aria-label="Title"[^>]+type="text"/);
+    expect(markup).toContain('class="studio-editor-input studio-body-editor"');
   });
 
   it("exposes a collapsed side menu with an operable disclosure control", () => {
