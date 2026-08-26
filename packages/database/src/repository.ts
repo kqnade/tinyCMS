@@ -157,6 +157,7 @@ export interface EditorialRepository {
   saveDraft(input: SaveDraftInput): Promise<PostDraft>;
   checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
   getAuthor(id: string): Promise<Author>;
+  getAuthorByAccessSubject(accessSubject: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
   getRevision(id: string): Promise<PostRevision>;
@@ -189,6 +190,12 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
 
   const getAuthor = (id: string): Promise<Author> =>
     readOne(db.select().from(authors).where(eq(authors.id, id)).limit(1), "author");
+
+  const getAuthorByAccessSubject = (accessSubject: string): Promise<Author> =>
+    readOne(
+      db.select().from(authors).where(eq(authors.accessSubject, accessSubject)).limit(1),
+      "author",
+    );
 
   const upsertAuthorByAccessSubject = async (input: CreateAuthorInput): Promise<Author> => {
     try {
@@ -1120,6 +1127,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     saveDraft,
     checkpointDraft,
     getAuthor,
+    getAuthorByAccessSubject,
     getPost,
     getPostBySlug,
     getRevision,

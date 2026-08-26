@@ -61,6 +61,11 @@ describe("editorial API repository", () => {
     expect(second.author.displayName).toBe("Updated name");
     expect(second.post.createdBy).toBe(first.author.id);
     expect(second.revision.authorId).toBe(first.author.id);
+    await expect(
+      repository.getAuthorByAccessSubject("access-subject-reuse"),
+    ).resolves.toMatchObject({
+      id: first.author.id,
+    });
     await expect(repository.getAuthor(second.author.id)).resolves.toMatchObject({
       accessSubject: "access-subject-reuse",
       email: "updated@example.test",
