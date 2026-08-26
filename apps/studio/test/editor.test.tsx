@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StudioEditor, type StudioEditorHandle } from "../src/editor";
-import { createEditorContent } from "../src/editor-content";
+import { createEditorContent, type EditorContent } from "../src/editor-content";
 
 afterEach(() => {
   cleanup();
@@ -68,7 +68,7 @@ describe("StudioEditor", () => {
     const read = editorRef.current?.getContent();
     expect(read).toEqual(content);
     expect(read).not.toBe(content);
-    expect(read?.document).not.toBe(content.document);
+    expect(read?.content).not.toBe(content.content);
 
     editorRef.current?.setContent(
       createEditorContent({
@@ -86,7 +86,110 @@ describe("StudioEditor", () => {
     );
   });
 
-  it("emits a cloned versioned envelope for typed document changes", async () => {
+  it("fails explicitly when the top-level UI content shape is malformed", () => {
+    const malformed = {
+      contentVersion: 1,
+      document: { type: "doc", content: [] },
+    } as unknown as EditorContent;
+
+    expect(() => render(<StudioEditor content={malformed} />)).toThrow(
+      "Studio editor content normalization failed",
+    );
+  });
+
+  it("normalizes link attrs from the mounted Tiptap JSON", () => {
+    const editorRef = createRef<StudioEditorHandle>();
+    render(
+      <StudioEditor
+        content={createEditorContent({
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  text: "Docs",
+                  marks: [
+                    {
+                      type: "link",
+                      attrs: {
+                        class: "author-supplied",
+                        href: "https://example.test/docs",
+                        rel: "author-supplied",
+                        target: "_self",
+                        title: "Author supplied",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        })}
+        ref={editorRef}
+      />,
+    );
+
+    expect(editorRef.current?.getContent()).toEqual(
+      createEditorContent({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "Docs",
+                marks: [{ type: "link", attrs: { href: "https://example.test/docs" } }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(editorRef.current?.getContent()).not.toHaveProperty("document");
+  });
+
+  it("preserves inline hard breaks from the mounted Tiptap JSON", () => {
+    const editorRef = createRef<StudioEditorHandle>();
+    render(
+      <StudioEditor
+        content={createEditorContent({
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                { type: "text", text: "before" },
+                { type: "hardBreak" },
+                { type: "text", text: "after" },
+              ],
+            },
+          ],
+        })}
+        ref={editorRef}
+      />,
+    );
+
+    expect(editorRef.current?.getContent()).toEqual(
+      createEditorContent({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "before" },
+              { type: "hardBreak" },
+              { type: "text", text: "after" },
+            ],
+          },
+        ],
+      }),
+    );
+  });
+
+  it("emits cloned versioned content for typed document changes", async () => {
     installJsdomGeometry();
     const content = createEditorContent({
       type: "doc",
@@ -115,7 +218,7 @@ describe("StudioEditor", () => {
     const emitted = onChange.mock.lastCall?.[0];
     expect(emitted).toMatchObject({
       contentVersion: 1,
-      document: { type: "doc" },
+      content: { type: "doc" },
     });
     expect(emitted).toEqual(
       createEditorContent({
@@ -124,8 +227,8 @@ describe("StudioEditor", () => {
       }),
     );
     expect(emitted).not.toBe(content);
-    expect(emitted?.document).not.toBe(content.document);
-    expect(emitted?.document.content[0]).not.toBe(content.document.content[0]);
+    expect(emitted?.content).not.toBe(content.content);
+    expect(emitted?.content.content[0]).not.toBe(content.content.content[0]);
   });
 
   it("round-trips task items and canonical header-first tables", () => {
@@ -264,8 +367,8 @@ describe("StudioEditor", () => {
     fireEvent.click(button);
 
     const emitted = proseMirrorOnChange.mock.lastCall?.[0];
-    expect(emitted).toMatchObject({ contentVersion: 1, document: { type: "doc" } });
-    const marks = emitted?.document.content[0]?.content?.[1]?.marks;
+    expect(emitted).toMatchObject({ contentVersion: 1, content: { type: "doc" } });
+    const marks = emitted?.content.content[0]?.content?.[1]?.marks;
     expect(marks?.[0]?.type).toBe(markType);
     if (markType === "link") {
       expect(marks?.[0]?.attrs).toMatchObject({ href: "https://example.test/article" });
@@ -424,7 +527,7 @@ describe("StudioEditor", () => {
       await user.type(proseMirror, shortcut);
     }
 
-    expect(editorRef.current?.getContent().document.content[0]?.type).toBe(expectedType);
+    expect(editorRef.current?.getContent().content.content[0]?.type).toBe(expectedType);
     cleanup();
   });
 });

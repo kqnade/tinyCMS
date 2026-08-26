@@ -3,15 +3,16 @@ import {
   createEditorContent,
   createEmptyEditorContent,
   getEditorContent,
+  normalizeEditorContent,
+  parseEditorContent,
   setEditorContent,
-  validateEditorContent,
 } from "../src/editor-content";
 
 describe("Studio editor content", () => {
-  it("creates a version-one envelope with an empty document", () => {
+  it("creates version-one content with an empty Tiptap document", () => {
     expect(createEmptyEditorContent()).toEqual({
       contentVersion: 1,
-      document: { type: "doc", content: [] },
+      content: { type: "doc", content: [] },
     });
   });
 
@@ -28,15 +29,33 @@ describe("Studio editor content", () => {
 
     expect(read).toEqual(original);
     expect(read).not.toBe(original);
-    expect(read.document).not.toBe(original.document);
-    expect(replacement.document.content[0]).toEqual({
+    expect(read.content).not.toBe(original.content);
+    expect(replacement.content.content[0]).toEqual({
       type: "paragraph",
       content: [{ type: "text", text: "Updated" }],
     });
-    expect(original.document.content[0]).toEqual({
+    expect(original.content.content[0]).toEqual({
       type: "paragraph",
       content: [{ type: "text", text: "Draft" }],
     });
+  });
+
+  it("fails explicitly for malformed top-level UI content", () => {
+    expect(() =>
+      parseEditorContent({
+        contentVersion: 1,
+        document: { type: "doc", content: [] },
+      }),
+    ).toThrow("Studio editor content normalization failed");
+  });
+
+  it("rejects raw HTML nodes instead of normalizing them", () => {
+    expect(
+      normalizeEditorContent({
+        contentVersion: 1,
+        content: { type: "doc", content: [{ type: "html", attrs: { html: "<p>unsafe</p>" } }] },
+      }),
+    ).toMatchObject({ ok: false });
   });
 
   it("accepts checked task items and canonical simple tables", () => {
@@ -63,7 +82,7 @@ describe("Studio editor content", () => {
               content: [
                 {
                   type: "tableHeader" as const,
-                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  attrs: { colspan: 2, rowspan: 2, colwidth: [80, 120] },
                   content: [
                     {
                       type: "paragraph" as const,
@@ -78,7 +97,7 @@ describe("Studio editor content", () => {
               content: [
                 {
                   type: "tableCell" as const,
-                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  attrs: { colspan: 3, rowspan: 1, colwidth: null },
                   content: [
                     {
                       type: "paragraph" as const,
@@ -94,18 +113,23 @@ describe("Studio editor content", () => {
     };
     const content = createEditorContent(document);
 
-    expect(validateEditorContent(content)).toEqual({ ok: true, value: content });
+    expect(normalizeEditorContent(content)).toEqual({ ok: true, value: content });
+    expect(content.content.content[1]?.content?.[0]?.content?.[0]?.attrs).toEqual({
+      colspan: 1,
+      rowspan: 1,
+      colwidth: null,
+    });
 
     const invalid = {
       ...content,
-      document: {
-        ...content.document,
+      content: {
+        ...content.content,
         content: [
           {
-            ...content.document.content[0],
+            ...content.content.content[0],
             content: [
               {
-                ...(content.document.content[0]?.content?.[0] ?? {}),
+                ...(content.content.content[0]?.content?.[0] ?? {}),
                 attrs: { checked: "true" },
               },
             ],
@@ -113,121 +137,13 @@ describe("Studio editor content", () => {
         ],
       },
     };
-    const result = validateEditorContent(invalid);
+    const result = normalizeEditorContent(invalid);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.issues[0]).toMatchObject({
       code: "invalid_task_item_checked",
-      path: ["document", "content", 0, "content", 0, "attrs", "checked"],
+      path: ["content", "content", 0, "content", 0, "attrs", "checked"],
     });
-  });
-
-  it.each([
-    [
-      "data cell in the header row",
-      {
-        type: "table",
-        content: [
-          {
-            type: "tableRow",
-            content: [
-              {
-                type: "tableCell",
-                attrs: { colspan: 1, rowspan: 1, colwidth: null },
-                content: [{ type: "paragraph" }],
-              },
-            ],
-          },
-        ],
-      },
-    ],
-    [
-      "header cell in a data row",
-      {
-        type: "table",
-        content: [
-          {
-            type: "tableRow",
-            content: [
-              {
-                type: "tableHeader",
-                attrs: { colspan: 1, rowspan: 1, colwidth: null },
-                content: [{ type: "paragraph" }],
-              },
-            ],
-          },
-          {
-            type: "tableRow",
-            content: [
-              {
-                type: "tableHeader",
-                attrs: { colspan: 1, rowspan: 1, colwidth: null },
-                content: [{ type: "paragraph" }],
-              },
-            ],
-          },
-        ],
-      },
-    ],
-    [
-      "cell with non-canonical attrs",
-      {
-        type: "table",
-        content: [
-          {
-            type: "tableRow",
-            content: [
-              {
-                type: "tableHeader",
-                attrs: { colspan: 2, rowspan: 1, colwidth: null },
-                content: [{ type: "paragraph" }],
-              },
-            ],
-          },
-        ],
-      },
-    ],
-    [
-      "cell with two paragraph children",
-      {
-        type: "table",
-        content: [
-          {
-            type: "tableRow",
-            content: [
-              {
-                type: "tableHeader",
-                attrs: { colspan: 1, rowspan: 1, colwidth: null },
-                content: [{ type: "paragraph" }, { type: "paragraph" }],
-              },
-            ],
-          },
-        ],
-      },
-    ],
-    [
-      "cell with a non-paragraph child",
-      {
-        type: "table",
-        content: [
-          {
-            type: "tableRow",
-            content: [
-              {
-                type: "tableHeader",
-                attrs: { colspan: 1, rowspan: 1, colwidth: null },
-                content: [{ type: "text", text: "not a paragraph" }],
-              },
-            ],
-          },
-        ],
-      },
-    ],
-    ["raw HTML node", { type: "html", attrs: { html: "<p>unsafe</p>" } }],
-  ])("rejects %s", (_description, node) => {
-    expect(
-      validateEditorContent({ contentVersion: 1, document: { type: "doc", content: [node] } }),
-    ).toMatchObject({ ok: false });
   });
 });

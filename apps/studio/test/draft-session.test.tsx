@@ -5,11 +5,16 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import type { DraftSaveRequest } from "../src/draft-session";
-import { createEmptyEditorContent } from "../src/editor-content";
+import {
+  type DraftSaveRequest,
+  type DraftSessionOptions,
+  useDraftSession,
+} from "../src/draft-session";
+import { createEditorContent, createEmptyEditorContent } from "../src/editor-content";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -52,6 +57,33 @@ function installJsdomGeometry() {
   });
 }
 
+function DraftSessionProbe(options: DraftSessionOptions) {
+  const session = useDraftSession(options);
+  const updatedBody = createEditorContent({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text: "Updated body" }] }],
+  });
+
+  return (
+    <>
+      <button type="button" onClick={() => session.setTitle("Updated title")}>
+        Update title
+      </button>
+      <button type="button" onClick={() => session.setContent(updatedBody)}>
+        Update body
+      </button>
+      <button type="button" onClick={() => void session.save()}>
+        Save draft
+      </button>
+      <output aria-label="Session title">{session.title}</output>
+      <output aria-label="Session body">
+        {session.content.content.content[0]?.content?.[0]?.text}
+      </output>
+      <output aria-label="Session status">{session.saveState}</output>
+    </>
+  );
+}
+
 describe("draft session", () => {
   it("autosaves a dirty title with the canonical content and advances the draft version", async () => {
     const saveDraft = vi.fn(
@@ -78,13 +110,63 @@ describe("draft session", () => {
 
     await waitFor(() => expect(saveDraft).toHaveBeenCalled());
     expect(saveDraft).toHaveBeenCalledWith({
-      title: "Updated title",
-      content: createEmptyEditorContent(),
       expectedDraftVersion: 1,
+      title: "Updated title",
+      contentVersion: 1,
+      content: createEmptyEditorContent().content,
     });
     await waitFor(() =>
       expect(screen.getByRole("status").getAttribute("aria-label")).toBe("Saved"),
     );
+  });
+
+  it("forwards optional API fields with independent content and metadata clones", async () => {
+    const initialContent = createEditorContent({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Draft" }] }],
+    });
+    const initialMetadata = {
+      seo: { description: "A draft" },
+      tags: ["writing"],
+    };
+    const saveDraft = vi.fn(async (_request: DraftSaveRequest) => ({
+      ok: true as const,
+      draftVersion: 2,
+    }));
+
+    render(
+      <App
+        initialContent={initialContent}
+        initialDraftVersion={1}
+        initialExcerpt={null}
+        initialMetadata={initialMetadata}
+        initialTitle="Initial title"
+        persistence={{ saveDraft }}
+        autosaveDelay={0}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "Updated title" },
+    });
+
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledTimes(1));
+    expect(saveDraft).toHaveBeenCalledWith({
+      expectedDraftVersion: 1,
+      title: "Updated title",
+      contentVersion: 1,
+      content: initialContent.content,
+      excerpt: null,
+      metadata: initialMetadata,
+    });
+
+    const request = saveDraft.mock.calls[0]?.[0];
+    const requestMetadata = request?.metadata as typeof initialMetadata | undefined;
+    expect(request?.content).not.toBe(initialContent.content);
+    expect(request?.content.content[0]).not.toBe(initialContent.content.content[0]);
+    expect(requestMetadata).not.toBe(initialMetadata);
+    expect(requestMetadata?.seo).not.toBe(initialMetadata.seo);
+    expect(requestMetadata?.tags).not.toBe(initialMetadata.tags);
   });
 
   it("exposes saving while one request is pending and then reports saved", async () => {
@@ -140,6 +222,24 @@ describe("draft session", () => {
     );
   });
 
+  it.each([
+    ["a conflict", { code: "CONFLICT" as const, ok: false as const }, "conflict"],
+    ["a returned error", { code: "ERROR" as const, ok: false as const }, "error"],
+  ])("retains title and body after %s", async (_label, result, status) => {
+    const saveDraft = vi.fn(async (_request: DraftSaveRequest) => result);
+
+    render(<DraftSessionProbe persistence={{ saveDraft }} autosaveDelay={0} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update title" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update body" }));
+
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "Session status" }).textContent).toBe(status),
+    );
+    expect(screen.getByRole("status", { name: "Session title" }).textContent).toBe("Updated title");
+    expect(screen.getByRole("status", { name: "Session body" }).textContent).toBe("Updated body");
+  });
+
   it("keeps a stale conflict explicit without retrying the stale version", async () => {
     let resolveSave: ((result: { ok: false; code: "CONFLICT" }) => void) | undefined;
     const saveDraft = vi.fn(
@@ -181,6 +281,22 @@ describe("draft session", () => {
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
       false,
     );
+  });
+
+  it("retains title and body after a thrown persistence failure", async () => {
+    const saveDraft = vi.fn(async (_request: DraftSaveRequest) => {
+      throw new Error("network unavailable");
+    });
+
+    render(<DraftSessionProbe persistence={{ saveDraft }} autosaveDelay={0} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update title" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update body" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "Session status" }).textContent).toBe("error"),
+    );
+    expect(screen.getByRole("status", { name: "Session title" }).textContent).toBe("Updated title");
+    expect(screen.getByRole("status", { name: "Session body" }).textContent).toBe("Updated body");
   });
 
   it.each([0, -1, 1.5])("rejects an invalid initial draft version %s", (draftVersion) => {
@@ -318,6 +434,57 @@ describe("draft session", () => {
     expect(saveDraft.mock.calls[0]?.[0]).toMatchObject({ title: "Latest" });
   });
 
+  it("waits exactly 2000 milliseconds after the latest edit by default", async () => {
+    vi.useFakeTimers();
+    const saveDraft = vi.fn(async (request: DraftSaveRequest) => ({
+      draftVersion: request.expectedDraftVersion + 1,
+      ok: true as const,
+    }));
+
+    render(<App persistence={{ saveDraft }} />);
+    const title = screen.getByRole("textbox", { name: "Title" });
+    fireEvent.change(title, { target: { value: "First" } });
+
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(saveDraft).not.toHaveBeenCalled();
+
+    fireEvent.change(title, { target: { value: "Latest" } });
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(saveDraft).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(saveDraft).toHaveBeenCalledTimes(1);
+    expect(saveDraft.mock.calls[0]?.[0]).toMatchObject({ title: "Latest" });
+  });
+
+  it("flushes manual Save immediately and cancels its pending autosave", async () => {
+    vi.useFakeTimers();
+    let resolveSave: ((result: { draftVersion: number; ok: true }) => void) | undefined;
+    const saveDraft = vi.fn(
+      (request: DraftSaveRequest) =>
+        new Promise<{ draftVersion: number; ok: true }>((resolve) => {
+          resolveSave = () => resolve({ draftVersion: request.expectedDraftVersion + 1, ok: true });
+        }),
+    );
+
+    render(<DraftSessionProbe persistence={{ saveDraft }} />);
+    const baselineTimerCount = vi.getTimerCount();
+    fireEvent.click(screen.getByRole("button", { name: "Update title" }));
+    expect(vi.getTimerCount()).toBe(baselineTimerCount + 1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(saveDraft).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(baselineTimerCount);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(saveDraft).toHaveBeenCalledTimes(1);
+
+    resolveSave?.({ draftVersion: 2, ok: true });
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
   it("reports an invalid version as an error even when a newer edit is pending", async () => {
     let resolveSave: ((result: { ok: true; draftVersion: number }) => void) | undefined;
     const saveDraft = vi.fn(
@@ -341,7 +508,7 @@ describe("draft session", () => {
     expect(saveDraft).toHaveBeenCalledTimes(1);
   });
 
-  it("marks a body-only edit dirty and persists its canonical document", async () => {
+  it("marks a body-only edit dirty and persists its canonical content", async () => {
     installJsdomGeometry();
     const saveDraft = vi.fn(async (_request: DraftSaveRequest) => ({
       draftVersion: 2,
@@ -356,15 +523,13 @@ describe("draft session", () => {
 
     await waitFor(() => expect(saveDraft).toHaveBeenCalledTimes(1));
     expect(saveDraft.mock.calls[0]?.[0]).toMatchObject({
-      content: {
-        contentVersion: 1,
-        document: {
-          content: [{ type: "paragraph", content: [{ type: "text", text: "Body text" }] }],
-          type: "doc",
-        },
-      },
       expectedDraftVersion: 1,
       title: "",
+      contentVersion: 1,
+      content: {
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Body text" }] }],
+        type: "doc",
+      },
     });
   });
 });

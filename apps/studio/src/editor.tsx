@@ -5,7 +5,7 @@ import {
 } from "@tiptap/core";
 import { BulletList, ListItem, ListKit, OrderedList, TaskItem } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent as TiptapEditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   forwardRef,
@@ -20,24 +20,24 @@ import {
   cloneEditorContent,
   createEditorContent,
   createEmptyEditorContent,
-  type EditorContentEnvelope,
-  type EditorDocument,
-  type EditorNode,
+  type EditorContent,
   parseEditorContent,
+  type RawTiptapDoc,
+  type RawTiptapNode,
 } from "./editor-content";
 
 export type StudioEditorHandle = {
-  getContent: () => EditorContentEnvelope;
-  setContent: (content: EditorContentEnvelope) => void;
+  getContent: () => EditorContent;
+  setContent: (content: EditorContent) => void;
   focus: () => void;
 };
 
 export type StudioEditorProps = {
   "aria-label"?: string;
   className?: string;
-  content?: EditorContentEnvelope;
-  initialContent?: EditorContentEnvelope;
-  onChange?: (content: EditorContentEnvelope) => void;
+  content?: EditorContent;
+  initialContent?: EditorContent;
+  onChange?: (content: EditorContent) => void;
 };
 
 const editorExtensions = [
@@ -91,21 +91,21 @@ const editorExtensions = [
   }),
 ];
 
-function toEditorDocument(value: JSONContent): EditorDocument {
+function toRawTiptapDoc(value: JSONContent): RawTiptapDoc {
   const content = Array.isArray(value.content) ? value.content : [];
 
   return {
     type: "doc",
-    content: content.map(toEditorNode),
+    content: content.map(toRawTiptapNode),
   };
 }
 
-function toEditorNode(value: JSONContent): EditorNode {
+function toRawTiptapNode(value: JSONContent): RawTiptapNode {
   const attrs =
     value.type === "tableCell" || value.type === "tableHeader"
       ? { colspan: 1, rowspan: 1, colwidth: null }
       : value.attrs;
-  const content = Array.isArray(value.content) ? value.content.map(toEditorNode) : undefined;
+  const content = Array.isArray(value.content) ? value.content.map(toRawTiptapNode) : undefined;
 
   return {
     type: value.type ?? "paragraph",
@@ -116,8 +116,8 @@ function toEditorNode(value: JSONContent): EditorNode {
   };
 }
 
-function getCanonicalContent(editor: TiptapEditorInstance): EditorContentEnvelope {
-  return createEditorContent(toEditorDocument(editor.getJSON()));
+function getCanonicalContent(editor: TiptapEditorInstance): EditorContent {
+  return createEditorContent(toRawTiptapDoc(editor.getJSON()));
 }
 
 type FormatName = "bold" | "code" | "italic" | "link" | "strike";
@@ -226,7 +226,7 @@ function FormatButtonIcon({ name }: { name: FormatName }) {
   );
 }
 
-function toTiptapDocument(document: EditorDocument): JSONContent {
+function toTiptapDocument(document: RawTiptapDoc): JSONContent {
   return {
     type: "doc",
     content: document.content as JSONContent[],
@@ -269,8 +269,11 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
   ref,
 ) {
   const emptyContent = useMemo(() => createEmptyEditorContent(), []);
-  const resolvedContent = content ?? initialContent ?? emptyContent;
-  const initialDocument = useRef(resolvedContent.document);
+  const resolvedContent = useMemo(
+    () => parseEditorContent(content ?? initialContent ?? emptyContent),
+    [content, initialContent, emptyContent],
+  );
+  const initialDocument = useRef(resolvedContent.content);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [selection, setSelection] = useState({ from: 0, to: 0 });
@@ -311,7 +314,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
     const nextContent = cloneEditorContent(resolvedContent);
     if (JSON.stringify(getCanonicalContent(editor)) === JSON.stringify(nextContent)) return;
 
-    editor.commands.setContent(toTiptapDocument(nextContent.document), { emitUpdate: false });
+    editor.commands.setContent(toTiptapDocument(nextContent.content), { emitUpdate: false });
     setSlashState(null);
     setSlashIndex(0);
   }, [content, editor, resolvedContent]);
@@ -328,7 +331,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
           : cloneEditorContent(resolvedContent),
       setContent: (nextContent) => {
         const parsedContent = parseEditorContent(nextContent);
-        editor?.commands.setContent(toTiptapDocument(parsedContent.document), {
+        editor?.commands.setContent(toTiptapDocument(parsedContent.content), {
           emitUpdate: false,
         });
         onChangeRef.current?.(cloneEditorContent(parsedContent));
@@ -468,7 +471,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
           ))}
         </div>
       ) : null}
-      <EditorContent editor={editor} />
+      <TiptapEditorContent editor={editor} />
     </div>
   );
 });

@@ -73,6 +73,8 @@ const statusLabels: Record<DraftSaveState, string> = {
 export function App({
   initialContent,
   initialDraftVersion,
+  initialExcerpt,
+  initialMetadata,
   initialTitle,
   persistence,
   autosaveDelay,
@@ -82,6 +84,8 @@ export function App({
     ...(autosaveDelay === undefined ? {} : { autosaveDelay }),
     ...(initialContent === undefined ? {} : { initialContent }),
     ...(initialDraftVersion === undefined ? {} : { initialDraftVersion }),
+    ...(initialExcerpt === undefined ? {} : { initialExcerpt }),
+    ...(initialMetadata === undefined ? {} : { initialMetadata }),
     ...(initialTitle === undefined ? {} : { initialTitle }),
     ...(persistence === undefined ? {} : { persistence }),
   });

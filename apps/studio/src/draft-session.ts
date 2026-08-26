@@ -2,14 +2,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cloneEditorContent,
   createEmptyEditorContent,
-  type EditorContentEnvelope,
+  type EditorContent,
   parseEditorContent,
+  type RawTiptapDoc,
 } from "./editor-content";
 
+export type JsonValue = null | boolean | number | string | readonly JsonValue[] | JsonObject;
+
+export interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
+
 export type DraftSaveRequest = {
-  readonly title: string;
-  readonly content: EditorContentEnvelope;
   readonly expectedDraftVersion: number;
+  readonly title: string;
+  readonly contentVersion: 1;
+  readonly content: RawTiptapDoc;
+  readonly excerpt?: string | null;
+  readonly metadata?: JsonObject;
 };
 
 export type DraftSaveResult =
@@ -22,31 +32,35 @@ export type DraftPersistence = {
 
 export type DraftSnapshot = {
   readonly title: string;
-  readonly content: EditorContentEnvelope;
+  readonly content: EditorContent;
   readonly draftVersion: number;
+  readonly excerpt?: string | null;
+  readonly metadata?: JsonObject;
 };
 
 export type DraftSaveState = "dirty" | "saving" | "saved" | "conflict" | "error";
 
 export type DraftSessionOptions = {
   readonly autosaveDelay?: number;
-  readonly initialContent?: EditorContentEnvelope;
+  readonly initialContent?: EditorContent;
   readonly initialDraftVersion?: number;
   readonly initialTitle?: string;
+  readonly initialExcerpt?: string | null;
+  readonly initialMetadata?: JsonObject;
   readonly persistence?: DraftPersistence;
 };
 
 export type DraftSession = {
-  readonly content: EditorContentEnvelope;
+  readonly content: EditorContent;
   readonly draftVersion: number;
   readonly save: () => Promise<void>;
   readonly saveState: DraftSaveState;
-  readonly setContent: (content: EditorContentEnvelope) => void;
+  readonly setContent: (content: EditorContent) => void;
   readonly setTitle: (title: string) => void;
   readonly title: string;
 };
 
-const defaultAutosaveDelay = 500;
+const defaultAutosaveDelay = 2_000;
 
 function assertDraftVersion(draftVersion: number): number {
   if (!Number.isSafeInteger(draftVersion) || draftVersion < 1) {
@@ -56,11 +70,29 @@ function assertDraftVersion(draftVersion: number): number {
   return draftVersion;
 }
 
+function cloneJsonValue(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(cloneJsonValue);
+  if (value !== null && typeof value === "object") {
+    const clone: Record<string, JsonValue> = {};
+    for (const [key, child] of Object.entries(value)) {
+      clone[key] = cloneJsonValue(child);
+    }
+    return clone;
+  }
+  return value;
+}
+
+function cloneJsonObject(value: JsonObject): JsonObject {
+  return cloneJsonValue(value) as JsonObject;
+}
+
 function snapshotsEqual(left: DraftSnapshot, right: DraftSnapshot): boolean {
   return (
     left.title === right.title &&
     JSON.stringify(left.content) === JSON.stringify(right.content) &&
-    left.draftVersion === right.draftVersion
+    left.draftVersion === right.draftVersion &&
+    left.excerpt === right.excerpt &&
+    JSON.stringify(left.metadata) === JSON.stringify(right.metadata)
   );
 }
 
@@ -85,11 +117,15 @@ function createInitialSnapshot(options: DraftSessionOptions): DraftSnapshot {
   const content = options.initialContent
     ? parseEditorContent(options.initialContent)
     : createEmptyEditorContent();
+  const metadata =
+    options.initialMetadata === undefined ? undefined : cloneJsonObject(options.initialMetadata);
 
   return {
     content,
     draftVersion: assertDraftVersion(options.initialDraftVersion ?? 1),
     title: options.initialTitle ?? "",
+    ...(options.initialExcerpt === undefined ? {} : { excerpt: options.initialExcerpt }),
+    ...(metadata === undefined ? {} : { metadata }),
   };
 }
 
@@ -125,7 +161,7 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
 
   const scheduleAutosave = useCallback(() => {
     if (!persistenceRef.current) return;
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    if (autosaveTimerRef.current !== null) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(
       () => {
         autosaveTimerRef.current = null;
@@ -139,6 +175,10 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
     const persistence = persistenceRef.current;
     if (!persistence) return;
 
+    if (autosaveTimerRef.current !== null) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
     const currentState = saveStateRef.current;
     const pendingSave = pendingSaveRef.current;
     if (pendingSave) return pendingSave;
@@ -147,17 +187,23 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
     }
 
     const snapshotAtRequest = snapshotRef.current;
+    const requestContent = cloneEditorContent(snapshotAtRequest.content);
     const request: DraftSaveRequest = {
-      content: cloneEditorContent(snapshotAtRequest.content),
       expectedDraftVersion: snapshotAtRequest.draftVersion,
       title: snapshotAtRequest.title,
+      contentVersion: requestContent.contentVersion,
+      content: requestContent.content,
+      ...(snapshotAtRequest.excerpt === undefined ? {} : { excerpt: snapshotAtRequest.excerpt }),
+      ...(snapshotAtRequest.metadata === undefined
+        ? {}
+        : { metadata: cloneJsonObject(snapshotAtRequest.metadata) }),
     };
     updateState("saving");
 
     const pending = Promise.resolve()
       .then(() => persistence.saveDraft(request))
       .then((result) => {
-        if (autosaveTimerRef.current) {
+        if (autosaveTimerRef.current !== null) {
           clearTimeout(autosaveTimerRef.current);
           autosaveTimerRef.current = null;
         }
@@ -191,7 +237,7 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
         if (!unchanged) scheduleAutosave();
       })
       .catch(() => {
-        if (autosaveTimerRef.current) {
+        if (autosaveTimerRef.current !== null) {
           clearTimeout(autosaveTimerRef.current);
           autosaveTimerRef.current = null;
         }
@@ -211,7 +257,7 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
 
   useEffect(
     () => () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      if (autosaveTimerRef.current !== null) clearTimeout(autosaveTimerRef.current);
     },
     [],
   );
@@ -226,7 +272,7 @@ export function useDraftSession(options: DraftSessionOptions = {}): DraftSession
   );
 
   const setContent = useCallback(
-    (content: EditorContentEnvelope) => {
+    (content: EditorContent) => {
       updateSnapshot({ ...snapshotRef.current, content: cloneEditorContent(content) });
       updateState("dirty");
       scheduleAutosave();
