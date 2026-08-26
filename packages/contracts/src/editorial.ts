@@ -2,6 +2,18 @@ import type { SuccessResponse } from "./http";
 
 export const EDITOR_CONTENT_VERSION = 1 as const;
 
+export type RawTiptapDoc = unknown;
+
+export type EditorContentDto = {
+  contentVersion: typeof EDITOR_CONTENT_VERSION;
+  content: RawTiptapDoc;
+};
+
+type OptionalEditorContentDto = {
+  contentVersion?: typeof EDITOR_CONTENT_VERSION;
+  content?: RawTiptapDoc;
+};
+
 type JsonPrimitive = string | number | boolean | null;
 
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -35,10 +47,8 @@ export type PostDto = {
   updatedByAuthorId: UuidV7;
   createdAt: UtcTimestamp;
   updatedAt: UtcTimestamp;
-  contentVersion: typeof EDITOR_CONTENT_VERSION;
-  content: unknown;
   metadata: JsonObject;
-};
+} & EditorContentDto;
 
 export type PostListItemDto = {
   id: UuidV7;
@@ -64,11 +74,10 @@ export type PostRevisionListItemDto = {
   createdAt: UtcTimestamp;
 };
 
-export type PostRevisionDto = PostRevisionListItemDto & {
-  contentVersion: typeof EDITOR_CONTENT_VERSION;
-  content: unknown;
-  metadata: JsonObject;
-};
+export type PostRevisionDto = PostRevisionListItemDto &
+  EditorContentDto & {
+    metadata: JsonObject;
+  };
 
 export type PostRevisionRouteParams = {
   postId: UuidV7;
@@ -94,18 +103,14 @@ export type PostRouteParams = {
 export type CreatePostRequest = {
   slug?: string;
   title?: string;
-  contentVersion?: typeof EDITOR_CONTENT_VERSION;
-  content?: unknown;
-};
+} & OptionalEditorContentDto;
 
 export type SavePostDraftRequest = {
   expectedDraftVersion: number;
   title: string;
   excerpt?: string | null;
-  contentVersion: typeof EDITOR_CONTENT_VERSION;
-  content: unknown;
   metadata?: JsonObject;
-};
+} & EditorContentDto;
 
 export type CheckpointPostRevisionRequest = {
   expectedDraftVersion: number;

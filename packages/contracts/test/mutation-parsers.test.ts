@@ -273,6 +273,45 @@ describe("editor mutation body parsers", () => {
     );
   });
 
+  it("rejects an outer document field without traversing raw content", () => {
+    const rawDoc = new Proxy(
+      { type: "doc" },
+      {
+        get() {
+          throw new Error("content must not be traversed");
+        },
+      },
+    );
+
+    const createResult = parseCreatePostRequest({
+      slug: "hello-world",
+      title: "A title",
+      contentVersion: 1,
+      content: rawDoc,
+      document: { type: "doc" },
+    });
+    const draftResult = parseSavePostDraftRequest({
+      expectedDraftVersion: 3,
+      title: "Draft title",
+      contentVersion: 1,
+      content: rawDoc,
+      document: { type: "doc" },
+    });
+
+    expect(createResult).toMatchObject({ ok: false });
+    expect(draftResult).toMatchObject({ ok: false });
+    expect(createResult.ok ? undefined : createResult.issues).toContainEqual({
+      path: ["document"],
+      code: "unknown_key",
+      message: "Unknown property is not allowed.",
+    });
+    expect(draftResult.ok ? undefined : draftResult.issues).toContainEqual({
+      path: ["document"],
+      code: "unknown_key",
+      message: "Unknown property is not allowed.",
+    });
+  });
+
   it("bounds draft excerpts and JSON metadata by code points and traversal", () => {
     const nestedAtLimit: Record<string, unknown> = {};
     let nestedCursor = nestedAtLimit;

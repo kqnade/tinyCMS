@@ -6,6 +6,7 @@ import {
   type CreatePostResponse,
   type CursorPage,
   EDITOR_CONTENT_VERSION,
+  type EditorContentDto,
   type PostDto,
   type PostListItemDto,
   type PostListQuery,
@@ -16,6 +17,7 @@ import {
   type PostRevisionRouteParams,
   type PostRevisionWriteResultDto,
   type PostRouteParams,
+  type RawTiptapDoc,
   type ReadPostResponse,
   type RestorePostRevisionRequest,
   type RestorePostRevisionResponse,
@@ -24,6 +26,21 @@ import {
 } from "../src/index";
 
 describe("editorial DTO contracts", () => {
+  it("serializes the editor content DTO with its exact transport fields", () => {
+    const rawDoc: RawTiptapDoc = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }],
+    };
+    const editorContent: EditorContentDto = {
+      contentVersion: EDITOR_CONTENT_VERSION,
+      content: rawDoc,
+    };
+
+    expect(JSON.stringify(editorContent)).toBe(
+      '{"contentVersion":1,"content":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Hello"}]}]}}',
+    );
+  });
+
   it("serializes a complete post DTO with structured content and metadata", () => {
     const post: PostDto = {
       id: "0192f5a4-7b3c-7d1e-8f20-123456789abc",
