@@ -1,7 +1,7 @@
 import { HtmlRenderer, Parser } from "commonmark";
 import { describe, expect, it } from "vitest";
 import { CONTENT_VERSION, ContentValidationError, renderMarkdown } from "../src/index";
-import { canonicalContentDocument } from "./fixtures";
+import { canonicalContentDocument, tiptapHardBreakDocument } from "./fixtures";
 
 const commonmarkParser = new Parser();
 const commonmarkHtmlRenderer = new HtmlRenderer();
@@ -11,6 +11,635 @@ function renderCommonmarkHtml(markdown: string): string {
 }
 
 describe("Markdown renderer", () => {
+  it("renders Tiptap hardBreak nodes as deterministic CommonMark hard breaks", () => {
+    const output = renderMarkdown(CONTENT_VERSION, tiptapHardBreakDocument, {
+      resolveMediaUrl: () => null,
+    });
+
+    expect(output).toBe(
+      "Before\\\n[Linked &amp; ready](https://example.com/?q=1&x=2)\\\nHTML\\-looking: &lt;em&gt;unsafe&lt;/em&gt;",
+    );
+    expect(renderCommonmarkHtml(output)).toBe(
+      '<p>Before<br />\n<a href="https://example.com/?q=1&amp;x=2">Linked &amp; ready</a><br />\nHTML-looking: &lt;em&gt;unsafe&lt;/em&gt;</p>\n',
+    );
+  });
+
+  it("renders hardBreak nodes inside table cells as fixed HTML breaks", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Header" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            { type: "text", text: "A" },
+                            { type: "hardBreak" },
+                            { type: "text", text: "B" },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("| Header |\n| --- |\n| A<br>B |");
+  });
+
+  it("keeps hardBreak indentation stable in nested task and blockquote Markdown", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: false },
+                  content: [
+                    {
+                      type: "paragraph",
+                      content: [
+                        { type: "text", text: "Parent" },
+                        { type: "hardBreak" },
+                        { type: "text", text: "Continuation" },
+                      ],
+                    },
+                    {
+                      type: "blockquote",
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            { type: "text", text: "Quote" },
+                            { type: "hardBreak" },
+                            { type: "text", text: "next" },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe(
+      ["- [ ] Parent\\", "      Continuation", "", "      > Quote\\", "      > next"].join("\n"),
+    );
+  });
+
+  it("preserves the generated hard-break newline at the end of a block", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "End" }, { type: "hardBreak" }],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("End\\\n");
+  });
+
+  it("continues trimming a literal text newline after an escaped backslash", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Literal\\\n" }] }],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("Literal\\\\");
+  });
+
+  it("keeps one blank separator after a paragraph-ending hard break", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "First" }, { type: "hardBreak" }],
+            },
+            { type: "paragraph", content: [{ type: "text", text: "Second" }] },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("First\\\n\nSecond");
+  });
+
+  it("preserves terminal hard breaks in final bullet and task list items", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "bulletList",
+              content: [
+                {
+                  type: "listItem",
+                  content: [
+                    {
+                      type: "paragraph",
+                      content: [{ type: "text", text: "Bullet" }, { type: "hardBreak" }],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: false },
+                  content: [
+                    {
+                      type: "paragraph",
+                      content: [{ type: "text", text: "Task" }, { type: "hardBreak" }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("- Bullet\\\n\n- [ ] Task\\\n");
+  });
+
+  it("renders checked and unchecked task items with exact GFM markers", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: false },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Open" }] }],
+                },
+                {
+                  type: "taskItem",
+                  attrs: { checked: true },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Done" }] }],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("- [ ] Open\n- [x] Done");
+  });
+
+  it("indents task continuations and nested blocks by the six-character marker width", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: false },
+                  content: [
+                    { type: "paragraph", content: [{ type: "text", text: "Parent" }] },
+                    { type: "paragraph", content: [{ type: "text", text: "Continuation" }] },
+                    {
+                      type: "taskList",
+                      content: [
+                        {
+                          type: "taskItem",
+                          attrs: { checked: true },
+                          content: [
+                            { type: "paragraph", content: [{ type: "text", text: "Child" }] },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      type: "bulletList",
+                      content: [
+                        {
+                          type: "listItem",
+                          content: [
+                            { type: "paragraph", content: [{ type: "text", text: "Bullet" }] },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      type: "orderedList",
+                      attrs: { start: 3 },
+                      content: [
+                        {
+                          type: "listItem",
+                          content: [
+                            { type: "paragraph", content: [{ type: "text", text: "Ordered" }] },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      type: "blockquote",
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Quote" }] }],
+                    },
+                    {
+                      type: "codeBlock",
+                      attrs: { language: "typescript" },
+                      content: [{ type: "text", text: "const value = 1;" }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe(
+      [
+        "- [ ] Parent",
+        "",
+        "      Continuation",
+        "",
+        "      - [x] Child",
+        "",
+        "      - Bullet",
+        "",
+        "      3. Ordered",
+        "",
+        "      > Quote",
+        "",
+        "      ```typescript",
+        "      const value = 1;",
+        "      ```",
+      ].join("\n"),
+    );
+  });
+
+  it("renders the minimum table with a GFM delimiter row", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Ada" }] }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("| Name |\n| --- |\n| Ada |");
+  });
+
+  it("renders representative rectangular tables with inline marks and links", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }],
+                    },
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Role" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Ada" }] }],
+                    },
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            {
+                              type: "text",
+                              text: "Engineer",
+                              marks: [{ type: "bold" }],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Grace" }] }],
+                    },
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            {
+                              type: "text",
+                              text: "Compiler",
+                              marks: [{ type: "link", attrs: { href: "https://example.com" } }],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe(
+      [
+        "| Name | Role |",
+        "| --- | --- |",
+        "| Ada | **Engineer** |",
+        "| Grace | [Compiler](https://example.com) |",
+      ].join("\n"),
+    );
+  });
+
+  it("escapes table pipes once across text, code, links, and generated line breaks", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Plain" }] }],
+                    },
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Code" }] }],
+                    },
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Link" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [{ type: "text", text: "<script>|line1\nline2" }],
+                        },
+                      ],
+                    },
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [{ type: "text", text: "a|b", marks: [{ type: "code" }] }],
+                        },
+                      ],
+                    },
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            {
+                              type: "text",
+                              text: "link|text",
+                              marks: [{ type: "link", attrs: { href: "https://example.com/a|b" } }],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe(
+      [
+        "| Plain | Code | Link |",
+        "| --- | --- | --- |",
+        "| &lt;script&gt;\\|line1<br>line2 | `a\\|b` | [link\\|text](https://example.com/a\\|b) |",
+      ].join("\n"),
+    );
+  });
+
+  it("rejects malformed task and table nodes before rendering", () => {
+    const options = { resolveMediaUrl: () => null };
+    expect(() =>
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: "false" },
+                  content: [{ type: "paragraph" }],
+                },
+              ],
+            },
+          ],
+        },
+        options,
+      ),
+    ).toThrow(ContentValidationError);
+
+    const table = {
+      type: "table",
+      content: [
+        {
+          type: "tableRow",
+          content: [
+            {
+              type: "tableHeader",
+              attrs: { colspan: 2, rowspan: 1, colwidth: null },
+              content: [{ type: "paragraph" }],
+            },
+          ],
+        },
+        {
+          type: "tableRow",
+          content: [
+            {
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1, colwidth: null },
+              content: [{ type: "paragraph" }],
+            },
+          ],
+        },
+      ],
+    } as const;
+    expect(() =>
+      renderMarkdown(CONTENT_VERSION, { type: "doc", content: [table] }, options),
+    ).toThrow(ContentValidationError);
+
+    expect(() =>
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "html" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph" }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        options,
+      ),
+    ).toThrow(ContentValidationError);
+  });
+
   it("renders an empty document as an empty fragment", () => {
     expect(
       renderMarkdown(
@@ -545,5 +1174,62 @@ describe("Markdown renderer", () => {
     expect(second).toBe(first);
     expect(input).toEqual(before);
     expect(first.endsWith("\n")).toBe(false);
+  });
+
+  it("keeps task and table output deterministic for frozen input", () => {
+    const input = {
+      type: "doc",
+      content: [
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: true },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Done" }] }],
+            },
+          ],
+        },
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Key" }] }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Value" }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+    const before = JSON.parse(JSON.stringify(input));
+    const freeze = (value: unknown): void => {
+      if (typeof value !== "object" || value === null || Object.isFrozen(value)) return;
+      Object.freeze(value);
+      for (const child of Object.values(value)) freeze(child);
+    };
+    freeze(input);
+
+    const first = renderMarkdown(CONTENT_VERSION, input, { resolveMediaUrl: () => null });
+    const second = renderMarkdown(CONTENT_VERSION, input, { resolveMediaUrl: () => null });
+
+    expect(second).toBe(first);
+    expect(input).toEqual(before);
+    expect(first).toBe("- [x] Done\n\n| Key |\n| --- |\n| Value |");
   });
 });

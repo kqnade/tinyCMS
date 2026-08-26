@@ -1,7 +1,12 @@
 import {
   type ContentBlock,
+  type ContentInlineNode,
   type ContentListItemNode,
   type ContentListNode,
+  type ContentTableNode,
+  type ContentTableRowNode,
+  type ContentTaskItemNode,
+  type ContentTaskListNode,
   type ContentTextNode,
   parseContentDocument,
 } from "./schema";
@@ -49,6 +54,10 @@ function renderBlock(block: ContentBlock, context: RenderContext): string {
     case "bulletList":
     case "orderedList":
       return renderList(block, context);
+    case "taskList":
+      return renderTaskList(block, context);
+    case "table":
+      return renderTable(block);
     case "blockquote":
       return `<blockquote>${renderBlocks(block.content, context)}</blockquote>`;
     case "codeBlock":
@@ -93,6 +102,40 @@ function renderListItem(item: ContentListItemNode, context: RenderContext): stri
   return `<li>${renderBlocks(item.content, context)}</li>`;
 }
 
+function renderTaskList(block: ContentTaskListNode, context: RenderContext): string {
+  const items = block.content.map((item) => renderTaskItem(item, context)).join("\n");
+  return `<ul class="task-list">${items}</ul>`;
+}
+
+function renderTaskItem(item: ContentTaskItemNode, context: RenderContext): string {
+  const checked = item.attrs.checked;
+  const checkbox = checked
+    ? '<input type="checkbox" checked disabled aria-label="Completed task">'
+    : '<input type="checkbox" disabled aria-label="Incomplete task">';
+  return `<li class="task-item" data-checked="${checked}">${checkbox}<div class="task-item-content">${renderBlocks(item.content, context)}</div></li>`;
+}
+
+function renderTable(block: ContentTableNode): string {
+  const [headerRow, ...bodyRows] = block.content;
+  if (headerRow === undefined) {
+    throw new Error("Table must contain a header row");
+  }
+  const header = renderTableRow(headerRow, true);
+  const body = bodyRows.map((row) => renderTableRow(row, false)).join("\n");
+  return `<table><thead>${header}</thead><tbody>${body}</tbody></table>`;
+}
+
+function renderTableRow(row: ContentTableRowNode, header: boolean): string {
+  const cells = row.content
+    .map((cell) => {
+      const paragraph = cell.content[0];
+      const content = renderInline(paragraph.content);
+      return header ? `<th scope="col"><p>${content}</p></th>` : `<td><p>${content}</p></td>`;
+    })
+    .join("");
+  return `<tr>${cells}</tr>`;
+}
+
 function renderCodeBlock(block: Extract<ContentBlock, { type: "codeBlock" }>): string {
   const className =
     block.attrs.language === null ? "" : ` class="language-${block.attrs.language}"`;
@@ -126,8 +169,12 @@ function renderProviderLink(className: string, href: string, title: string): str
   return `<a class="link-card ${className}" href="${escapeHtml(href)}" rel="noopener noreferrer"><span class="link-card-title">${title}</span></a>`;
 }
 
-function renderInline(content: readonly ContentTextNode[] | undefined): string {
-  return (content ?? []).map(renderText).join("");
+function renderInline(content: readonly ContentInlineNode[] | undefined): string {
+  return (content ?? []).map(renderInlineNode).join("");
+}
+
+function renderInlineNode(node: ContentInlineNode): string {
+  return node.type === "hardBreak" ? "<br>" : renderText(node);
 }
 
 function renderText(node: ContentTextNode): string {

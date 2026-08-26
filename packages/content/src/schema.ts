@@ -5,6 +5,9 @@ const MAX_NODES = 1_000;
 const MAX_ISSUES = 64;
 const MAX_TEXT_LENGTH = 1_000_000;
 const MAX_TOTAL_TEXT_LENGTH = 1_000_000;
+const MAX_TABLE_ROWS = 100;
+const MAX_TABLE_COLUMNS = 20;
+const MAX_TABLE_CELLS = 400;
 
 const CODE_LANGUAGES = new Set([
   "bash",
@@ -74,15 +77,47 @@ export type ContentTextNode = {
   readonly marks?: readonly ContentTextMark[];
 };
 
+export type ContentHardBreakNode = { readonly type: "hardBreak" };
+
+export type ContentInlineNode = ContentTextNode | ContentHardBreakNode;
+
 export type ContentParagraphNode = {
   readonly type: "paragraph";
-  readonly content?: readonly ContentTextNode[];
+  readonly content?: readonly ContentInlineNode[];
+};
+
+export type ContentTableCellAttrs = {
+  readonly colspan: 1;
+  readonly rowspan: 1;
+  readonly colwidth: null;
+};
+
+export type ContentTableHeaderNode = {
+  readonly type: "tableHeader";
+  readonly attrs: ContentTableCellAttrs;
+  readonly content: readonly [ContentParagraphNode];
+};
+
+export type ContentTableCellNode = {
+  readonly type: "tableCell";
+  readonly attrs: ContentTableCellAttrs;
+  readonly content: readonly [ContentParagraphNode];
+};
+
+export type ContentTableRowNode = {
+  readonly type: "tableRow";
+  readonly content: readonly (ContentTableHeaderNode | ContentTableCellNode)[];
+};
+
+export type ContentTableNode = {
+  readonly type: "table";
+  readonly content: readonly ContentTableRowNode[];
 };
 
 export type ContentHeadingNode = {
   readonly type: "heading";
   readonly attrs: { readonly level: 1 | 2 | 3 | 4 | 5 | 6 };
-  readonly content?: readonly ContentTextNode[];
+  readonly content?: readonly ContentInlineNode[];
 };
 
 export type ContentListItemNode = {
@@ -102,6 +137,17 @@ export type ContentOrderedListNode = {
 };
 
 export type ContentListNode = ContentBulletListNode | ContentOrderedListNode;
+
+export type ContentTaskItemNode = {
+  readonly type: "taskItem";
+  readonly attrs: { readonly checked: boolean };
+  readonly content: readonly ContentTaskItemChild[];
+};
+
+export type ContentTaskListNode = {
+  readonly type: "taskList";
+  readonly content: readonly ContentTaskItemNode[];
+};
 
 export type ContentBlockquoteNode = {
   readonly type: "blockquote";
@@ -159,6 +205,7 @@ export type ContentOrdinaryBlock =
   | ContentParagraphNode
   | ContentHeadingNode
   | ContentListNode
+  | ContentTaskListNode
   | ContentBlockquoteNode
   | ContentCodeBlockNode
   | ContentHorizontalRuleNode;
@@ -166,11 +213,20 @@ export type ContentOrdinaryBlock =
 export type ContentListItemChild =
   | ContentParagraphNode
   | ContentListNode
+  | ContentTaskListNode
+  | ContentBlockquoteNode
+  | ContentCodeBlockNode;
+
+export type ContentTaskItemChild =
+  | ContentParagraphNode
+  | ContentListNode
+  | ContentTaskListNode
   | ContentBlockquoteNode
   | ContentCodeBlockNode;
 
 export type ContentBlock =
   | ContentOrdinaryBlock
+  | ContentTableNode
   | ContentImageNode
   | ContentBookmarkNode
   | ContentYoutubeNode
@@ -343,6 +399,12 @@ function parseBlock(
     case "orderedList":
       result = parseList(input, path, context, depth);
       break;
+    case "taskList":
+      result = parseTaskList(input, path, context, depth);
+      break;
+    case "table":
+      result = parseTable(input, path, context, depth);
+      break;
     case "blockquote":
       result = parseBlockquote(input, path, context, depth);
       break;
@@ -408,6 +470,9 @@ function parseOrdinaryBlock(
     if (input.type === "bulletList" || input.type === "orderedList") {
       return parseList(input, path, context, depth);
     }
+    if (input.type === "taskList") {
+      return parseTaskList(input, path, context, depth);
+    }
     if (input.type === "blockquote") {
       return parseBlockquote(input, path, context, depth);
     }
@@ -444,6 +509,9 @@ function parseListItemChild(
     if (input.type === "bulletList" || input.type === "orderedList") {
       return parseList(input, path, context, depth);
     }
+    if (input.type === "taskList") {
+      return parseTaskList(input, path, context, depth);
+    }
     if (input.type === "blockquote") {
       return parseBlockquote(input, path, context, depth);
     }
@@ -470,18 +538,19 @@ function parseParagraph(
     context.add([...path, "content"], "invalid_content", "Paragraph content must be an array");
     return undefined;
   }
-  const content: ContentTextNode[] = [];
+  const content: ContentInlineNode[] = [];
   if (Array.isArray(input.content)) {
     for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
-      const text = parseText(
+      const inline = parseInlineNode(
         input.content[index],
         [...path, "content", index],
         context,
         depth + 1,
         true,
+        true,
       );
-      if (text !== undefined) {
-        content.push(text);
+      if (inline !== undefined) {
+        content.push(inline);
       }
     }
   }
@@ -631,6 +700,337 @@ function parseListItem(
     : undefined;
 }
 
+function parseTaskList(
+  input: RecordValue,
+  path: Path,
+  context: ValidationContext,
+  depth: number,
+): ContentTaskListNode | undefined {
+  if (!hasExactKeys(input, ["type", "content"], path, context)) {
+    return undefined;
+  }
+  if (!Array.isArray(input.content) || input.content.length === 0) {
+    context.add(
+      [...path, "content"],
+      "invalid_content",
+      "Task list content must be a nonempty array",
+    );
+    return undefined;
+  }
+  const content: ContentTaskItemNode[] = [];
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
+    const item = parseTaskItem(
+      input.content[index],
+      [...path, "content", index],
+      context,
+      depth + 1,
+    );
+    if (item !== undefined) {
+      content.push(item);
+    }
+  }
+  return content.length === input.content.length ? { type: "taskList", content } : undefined;
+}
+
+function parseTaskItem(
+  input: unknown,
+  path: Path,
+  context: ValidationContext,
+  depth: number,
+): ContentTaskItemNode | undefined {
+  if (!context.enterNode(input, path, depth)) {
+    return undefined;
+  }
+  if (!isRecord(input)) {
+    context.add(path, "invalid_node", "Task item must be an object");
+    return undefined;
+  }
+  if (!hasExactKeys(input, ["type", "attrs", "content"], path, context)) {
+    context.leaveNode(input);
+    return undefined;
+  }
+  if (input.type !== "taskItem") {
+    context.add(
+      [...path, "type"],
+      "invalid_node_type",
+      "Task list content must contain taskItem nodes",
+    );
+    context.leaveNode(input);
+    return undefined;
+  }
+  if (
+    !isRecord(input.attrs) ||
+    !hasExactKeys(input.attrs, ["checked"], [...path, "attrs"], context)
+  ) {
+    context.leaveNode(input);
+    return undefined;
+  }
+  if (typeof input.attrs.checked !== "boolean") {
+    context.add(
+      [...path, "attrs", "checked"],
+      "invalid_attribute",
+      "Task item checked must be a boolean",
+    );
+    context.leaveNode(input);
+    return undefined;
+  }
+  if (!Array.isArray(input.content) || input.content.length === 0) {
+    context.add([...path, "content"], "invalid_content", "Task item content must be nonempty");
+    context.leaveNode(input);
+    return undefined;
+  }
+  const content: ContentTaskItemChild[] = [];
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
+    const child = parseListItemChild(
+      input.content[index],
+      [...path, "content", index],
+      context,
+      depth + 1,
+    );
+    if (child !== undefined) {
+      content.push(child);
+    }
+  }
+  const first = input.content[0];
+  if (!isRecord(first) || first.type !== "paragraph") {
+    context.add(
+      [...path, "content", 0],
+      "invalid_nesting",
+      "A task item must begin with a paragraph",
+    );
+  }
+  context.leaveNode(input);
+  return content.length === input.content.length && content[0]?.type === "paragraph"
+    ? { type: "taskItem", attrs: { checked: input.attrs.checked }, content }
+    : undefined;
+}
+
+function parseTable(
+  input: RecordValue,
+  path: Path,
+  context: ValidationContext,
+  depth: number,
+): ContentTableNode | undefined {
+  if (!hasExactKeys(input, ["type", "content"], path, context)) {
+    return undefined;
+  }
+  if (!Array.isArray(input.content)) {
+    context.add([...path, "content"], "invalid_content", "Table content must be an array");
+    return undefined;
+  }
+  if (input.content.length < 2) {
+    context.add([...path, "content"], "invalid_content", "Table must contain at least two rows");
+    return undefined;
+  }
+  if (input.content.length > MAX_TABLE_ROWS) {
+    context.stop([...path, "content"], "max_table_rows", "Table contains too many rows");
+    return undefined;
+  }
+
+  const content: ContentTableRowNode[] = [];
+  let columnCount: number | undefined;
+  let cellCount = 0;
+  for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
+    const rowPath = [...path, "content", index];
+    const rowInput = input.content[index];
+    if (isRecord(rowInput) && Array.isArray(rowInput.content)) {
+      const rowColumnCount = rowInput.content.length;
+      if (rowColumnCount > MAX_TABLE_COLUMNS) {
+        context.stop(
+          [...rowPath, "content"],
+          "max_table_columns",
+          "Table contains too many columns",
+        );
+        break;
+      }
+      if (columnCount === undefined && rowColumnCount > 0) {
+        columnCount = rowColumnCount;
+      } else if (
+        columnCount !== undefined &&
+        rowColumnCount > 0 &&
+        rowColumnCount !== columnCount
+      ) {
+        context.add(
+          [...rowPath, "content"],
+          "invalid_content",
+          "Table rows must contain the same number of cells",
+        );
+      }
+      cellCount += rowColumnCount;
+      if (cellCount > MAX_TABLE_CELLS) {
+        context.stop([...rowPath, "content"], "max_table_cells", "Table contains too many cells");
+        break;
+      }
+    }
+
+    const expectedCellType = index === 0 ? "tableHeader" : "tableCell";
+    const row = parseTableRow(rowInput, rowPath, context, depth + 1, expectedCellType);
+    if (row !== undefined) {
+      content.push(row);
+    }
+  }
+
+  return content.length === input.content.length && context.issues.length === 0
+    ? { type: "table", content }
+    : undefined;
+}
+
+function parseTableRow(
+  input: unknown,
+  path: Path,
+  context: ValidationContext,
+  depth: number,
+  expectedCellType: "tableHeader" | "tableCell",
+): ContentTableRowNode | undefined {
+  if (!context.enterNode(input, path, depth)) {
+    return undefined;
+  }
+  try {
+    if (!isRecord(input)) {
+      context.add(path, "invalid_node", "Table row must be an object");
+      return undefined;
+    }
+    if (!hasExactKeys(input, ["type", "content"], path, context)) {
+      return undefined;
+    }
+    if (input.type !== "tableRow") {
+      context.add(
+        [...path, "type"],
+        "invalid_node_type",
+        "Table content must contain tableRow nodes",
+      );
+      return undefined;
+    }
+    if (!Array.isArray(input.content) || input.content.length === 0) {
+      context.add(
+        [...path, "content"],
+        "invalid_content",
+        "Table rows must contain at least one cell",
+      );
+      return undefined;
+    }
+
+    const content: (ContentTableHeaderNode | ContentTableCellNode)[] = [];
+    for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
+      const cell = parseTableCell(
+        input.content[index],
+        [...path, "content", index],
+        context,
+        depth + 1,
+        expectedCellType,
+      );
+      if (cell !== undefined) {
+        content.push(cell);
+      }
+    }
+    return content.length === input.content.length ? { type: "tableRow", content } : undefined;
+  } finally {
+    context.leaveNode(input);
+  }
+}
+
+function parseTableCell(
+  input: unknown,
+  path: Path,
+  context: ValidationContext,
+  depth: number,
+  expectedType: "tableHeader" | "tableCell",
+): ContentTableHeaderNode | ContentTableCellNode | undefined {
+  if (!context.enterNode(input, path, depth)) {
+    return undefined;
+  }
+  try {
+    if (!isRecord(input)) {
+      context.add(path, "invalid_node", "Table cell must be an object");
+      return undefined;
+    }
+    if (!hasExactKeys(input, ["type", "attrs", "content"], path, context)) {
+      return undefined;
+    }
+    if (input.type !== expectedType) {
+      context.add(
+        [...path, "type"],
+        "invalid_node_type",
+        expectedType === "tableHeader"
+          ? "The first table row must contain tableHeader nodes"
+          : "Table body rows must contain tableCell nodes",
+      );
+      return undefined;
+    }
+    if (!isRecord(input.attrs)) {
+      context.add([...path, "attrs"], "invalid_attribute", "Table cell attrs must be an object");
+      return undefined;
+    }
+    if (
+      !hasExactKeys(input.attrs, ["colspan", "rowspan", "colwidth"], [...path, "attrs"], context)
+    ) {
+      return undefined;
+    }
+    if (input.attrs.colspan !== 1) {
+      context.add(
+        [...path, "attrs", "colspan"],
+        "invalid_attribute",
+        "Table cell colspan must be 1",
+      );
+      return undefined;
+    }
+    if (input.attrs.rowspan !== 1) {
+      context.add(
+        [...path, "attrs", "rowspan"],
+        "invalid_attribute",
+        "Table cell rowspan must be 1",
+      );
+      return undefined;
+    }
+    if (input.attrs.colwidth !== null) {
+      context.add(
+        [...path, "attrs", "colwidth"],
+        "invalid_attribute",
+        "Table cell colwidth must be null",
+      );
+      return undefined;
+    }
+    if (!Array.isArray(input.content) || input.content.length !== 1) {
+      context.add(
+        [...path, "content"],
+        "invalid_content",
+        "Table cells must contain exactly one paragraph",
+      );
+      return undefined;
+    }
+
+    const paragraphInput = input.content[0];
+    const paragraphPath = [...path, "content", 0];
+    if (!context.enterNode(paragraphInput, paragraphPath, depth + 1)) {
+      return undefined;
+    }
+    let paragraph: ContentParagraphNode | undefined;
+    try {
+      if (!isRecord(paragraphInput) || paragraphInput.type !== "paragraph") {
+        context.add(
+          [...paragraphPath, "type"],
+          "invalid_node_type",
+          "Table cells must contain a paragraph",
+        );
+      } else {
+        paragraph = parseParagraph(paragraphInput, paragraphPath, context, depth + 1);
+      }
+    } finally {
+      context.leaveNode(paragraphInput);
+    }
+    if (paragraph === undefined) {
+      return undefined;
+    }
+
+    const attrs: ContentTableCellAttrs = { colspan: 1, rowspan: 1, colwidth: null };
+    return input.type === "tableHeader"
+      ? { type: "tableHeader", attrs, content: [paragraph] }
+      : { type: "tableCell", attrs, content: [paragraph] };
+  } finally {
+    context.leaveNode(input);
+  }
+}
+
 function parseBlockquote(
   input: RecordValue,
   path: Path,
@@ -690,15 +1090,16 @@ function parseCodeBlock(
   const content: ContentTextNode[] = [];
   if (Array.isArray(input.content)) {
     for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
-      const text = parseText(
+      const inline = parseInlineNode(
         input.content[index],
         [...path, "content", index],
         context,
         depth + 1,
         false,
+        false,
       );
-      if (text !== undefined) {
-        content.push(text);
+      if (inline?.type === "text") {
+        content.push(inline);
       }
     }
   }
@@ -969,7 +1370,7 @@ function parseInlineContent(
   path: Path,
   context: ValidationContext,
   depth: number,
-): ContentTextNode[] | undefined {
+): ContentInlineNode[] | undefined {
   if (!Object.hasOwn(input, "content")) {
     return undefined;
   }
@@ -977,29 +1378,31 @@ function parseInlineContent(
     context.add([...path, "content"], "invalid_content", "Inline content must be an array");
     return undefined;
   }
-  const content: ContentTextNode[] = [];
+  const content: ContentInlineNode[] = [];
   for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
-    const text = parseText(
+    const inline = parseInlineNode(
       input.content[index],
       [...path, "content", index],
       context,
       depth + 1,
       true,
+      true,
     );
-    if (text !== undefined) {
-      content.push(text);
+    if (inline !== undefined) {
+      content.push(inline);
     }
   }
   return content.length === input.content.length ? content : undefined;
 }
 
-function parseText(
+function parseInlineNode(
   input: unknown,
   path: Path,
   context: ValidationContext,
   _depth: number,
   allowMarks: boolean,
-): ContentTextNode | undefined {
+  allowHardBreak: boolean,
+): ContentInlineNode | undefined {
   if (!context.enterNode(input, path, _depth)) {
     return undefined;
   }
@@ -1008,6 +1411,20 @@ function parseText(
     return undefined;
   }
   try {
+    if (input.type === "hardBreak") {
+      if (!hasExactKeys(input, ["type"], path, context)) {
+        return undefined;
+      }
+      if (!allowHardBreak) {
+        context.add(
+          [...path, "type"],
+          "invalid_nesting",
+          "Hard breaks are only allowed in text-capable blocks",
+        );
+        return undefined;
+      }
+      return { type: "hardBreak" };
+    }
     if (!hasKeys(input, ["type", "text"], ["marks"], path, context)) {
       return undefined;
     }
