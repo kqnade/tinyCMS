@@ -631,4 +631,547 @@ describe("editorial repository drafts", () => {
       code: RepositoryErrorCode.NOT_FOUND,
     });
   });
+
+  it("restores an older same-post revision into the draft and appends a new snapshot", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fb11",
+        accessSubject: "subject-draft-restore-success",
+        displayName: "Draft Restore Initial",
+        createdAt: 1_700_000_011_000,
+        updatedAt: 1_700_000_011_000,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fb12",
+        slug: "draft-restore-success",
+        createdAt: 1_700_000_011_001,
+        updatedAt: 1_700_000_011_001,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fb13",
+        version: 4,
+        title: "Older source title",
+        contentVersion: 1,
+        contentJson: JSON.stringify({
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Older source" }] }],
+        }),
+        excerpt: "Older source excerpt",
+        metadataJson: JSON.stringify({ stage: "older-source" }),
+        createdAt: 1_700_000_011_002,
+      },
+    });
+    const restoreAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3fb14";
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        restoreAuthorId,
+        "subject-draft-restore-author",
+        "Draft Restore Author",
+        1_700_000_011_003,
+        1_700_000_011_003,
+      )
+      .run();
+
+    const firstDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: 1,
+      authorId: initial.author.id,
+      title: "First divergent draft",
+      contentVersion: 1,
+      contentJson: JSON.stringify({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "First divergent" }] }],
+      }),
+      excerpt: "First divergent excerpt",
+      metadataJson: JSON.stringify({ stage: "first-divergent" }),
+      updatedAt: 1_700_000_011_004,
+    });
+    const firstCheckpoint = await repository.checkpointDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: firstDraft.version,
+      expectedRevisionVersion: initial.revision.version,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fb15",
+      authorId: initial.author.id,
+      createdAt: 1_700_000_011_005,
+    });
+    const secondDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: firstDraft.version,
+      authorId: initial.author.id,
+      title: "Second divergent draft",
+      contentVersion: 1,
+      contentJson: JSON.stringify({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Second divergent" }] }],
+      }),
+      excerpt: "Second divergent excerpt",
+      metadataJson: JSON.stringify({ stage: "second-divergent" }),
+      updatedAt: 1_700_000_011_006,
+    });
+    const secondCheckpoint = await repository.checkpointDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: secondDraft.version,
+      expectedRevisionVersion: firstCheckpoint.version,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fb16",
+      authorId: initial.author.id,
+      createdAt: 1_700_000_011_007,
+    });
+    const divergentDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: secondDraft.version,
+      authorId: initial.author.id,
+      title: "Unsaved divergent draft",
+      contentVersion: 1,
+      contentJson: JSON.stringify({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Unsaved divergent" }] }],
+      }),
+      excerpt: "Unsaved divergent excerpt",
+      metadataJson: JSON.stringify({ stage: "unsaved-divergent" }),
+      updatedAt: 1_700_000_011_008,
+    });
+    const revisionsBeforeRestore = await repository.getPostAggregate(initial.post.id);
+
+    const restored = await repository.restoreDraft({
+      postId: initial.post.id,
+      sourceRevisionId: initial.revision.id,
+      expectedDraftVersion: divergentDraft.version,
+      expectedRevisionVersion: secondCheckpoint.version,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fb17",
+      authorId: restoreAuthorId,
+      createdAt: 1_700_000_011_009,
+      updatedAt: 1_700_000_011_010,
+    });
+
+    expect(restored).toEqual({
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fb17",
+        postId: initial.post.id,
+        version: 7,
+        title: initial.revision.title,
+        contentVersion: initial.revision.contentVersion,
+        contentJson: initial.revision.contentJson,
+        excerpt: initial.revision.excerpt,
+        metadataJson: initial.revision.metadataJson,
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_011_009,
+      },
+      draft: {
+        postId: initial.post.id,
+        version: 5,
+        title: initial.revision.title,
+        contentVersion: initial.revision.contentVersion,
+        contentJson: initial.revision.contentJson,
+        excerpt: initial.revision.excerpt,
+        metadataJson: initial.revision.metadataJson,
+        authorId: restoreAuthorId,
+        updatedAt: 1_700_000_011_010,
+      },
+    });
+
+    const aggregate = await repository.getPostAggregate(initial.post.id);
+    expect(aggregate.revisions).toEqual([...revisionsBeforeRestore.revisions, restored.revision]);
+    expect(aggregate.revisions.map((revision) => revision.version)).toEqual([4, 5, 6, 7]);
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(restored.draft);
+  });
+
+  it("rejects a stale draft restore without changing the draft or revisions", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc11",
+        accessSubject: "subject-draft-restore-stale-draft",
+        displayName: "Stale Draft Restore Author",
+        createdAt: 1_700_000_011_100,
+        updatedAt: 1_700_000_011_100,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc12",
+        slug: "draft-restore-stale-draft",
+        createdAt: 1_700_000_011_101,
+        updatedAt: 1_700_000_011_101,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc13",
+        version: 1,
+        title: "Stale draft source",
+        contentVersion: 1,
+        contentJson: JSON.stringify({
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Stale source" }] }],
+        }),
+        excerpt: "Stale source excerpt",
+        metadataJson: JSON.stringify({ stage: "stale-source" }),
+        createdAt: 1_700_000_011_102,
+      },
+    });
+    const currentDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: 1,
+      authorId: initial.author.id,
+      title: "Current draft before stale restore",
+      contentVersion: 1,
+      contentJson: JSON.stringify({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Current draft" }] }],
+      }),
+      excerpt: "Current draft excerpt",
+      metadataJson: JSON.stringify({ stage: "current-draft" }),
+      updatedAt: 1_700_000_011_103,
+    });
+    const beforeDraft = await repository.getDraft(initial.post.id);
+    const beforeAggregate = await repository.getPostAggregate(initial.post.id);
+    const rejectedRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3fc14";
+
+    await expect(
+      repository.restoreDraft({
+        postId: initial.post.id,
+        sourceRevisionId: initial.revision.id,
+        expectedDraftVersion: currentDraft.version - 1,
+        expectedRevisionVersion: initial.revision.version,
+        revisionId: rejectedRevisionId,
+        authorId: initial.author.id,
+        createdAt: 1_700_000_011_104,
+        updatedAt: 1_700_000_011_105,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.CONFLICT,
+      message: "Draft restore conflicted with a newer version",
+    });
+    expect(await repository.getDraft(initial.post.id)).toEqual(beforeDraft);
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(beforeAggregate);
+    await expect(repository.getRevision(rejectedRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
+
+  it("rejects a stale revision restore without changing the draft or revisions", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd11",
+        accessSubject: "subject-draft-restore-stale-revision",
+        displayName: "Stale Revision Restore Author",
+        createdAt: 1_700_000_011_200,
+        updatedAt: 1_700_000_011_200,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd12",
+        slug: "draft-restore-stale-revision",
+        createdAt: 1_700_000_011_201,
+        updatedAt: 1_700_000_011_201,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd13",
+        version: 1,
+        title: "Stale revision source",
+        contentVersion: 1,
+        contentJson: JSON.stringify({
+          type: "doc",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "Stale revision source" }] },
+          ],
+        }),
+        excerpt: "Stale revision source excerpt",
+        metadataJson: JSON.stringify({ stage: "stale-revision-source" }),
+        createdAt: 1_700_000_011_202,
+      },
+    });
+    const currentDraft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: 1,
+      authorId: initial.author.id,
+      title: "Current draft before stale revision restore",
+      contentVersion: 1,
+      contentJson: JSON.stringify({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Current draft" }] }],
+      }),
+      excerpt: "Current draft excerpt",
+      metadataJson: JSON.stringify({ stage: "current-draft" }),
+      updatedAt: 1_700_000_011_203,
+    });
+    const concurrentRevision = await repository.appendRevision({
+      postId: initial.post.id,
+      authorId: initial.author.id,
+      expectedVersion: initial.revision.version,
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd14",
+        title: "Concurrent revision",
+        contentVersion: 1,
+        contentJson: JSON.stringify({
+          type: "doc",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "Concurrent revision" }] },
+          ],
+        }),
+        excerpt: "Concurrent revision excerpt",
+        metadataJson: JSON.stringify({ stage: "concurrent" }),
+        createdAt: 1_700_000_011_204,
+      },
+    });
+    const beforeDraft = await repository.getDraft(initial.post.id);
+    const beforeAggregate = await repository.getPostAggregate(initial.post.id);
+    const rejectedRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3fd15";
+
+    await expect(
+      repository.restoreDraft({
+        postId: initial.post.id,
+        sourceRevisionId: initial.revision.id,
+        expectedDraftVersion: currentDraft.version,
+        expectedRevisionVersion: initial.revision.version,
+        revisionId: rejectedRevisionId,
+        authorId: initial.author.id,
+        createdAt: 1_700_000_011_205,
+        updatedAt: 1_700_000_011_206,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.CONFLICT,
+      message: "Draft restore conflicted with a newer version",
+    });
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(beforeDraft);
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(beforeAggregate);
+    expect(beforeAggregate.revisions).toEqual([initial.revision, concurrentRevision]);
+    await expect(repository.getRevision(rejectedRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
+
+  it("maps missing posts, drafts, and same-post sources to not-found", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const target = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe11",
+        accessSubject: "subject-draft-restore-not-found-target",
+        displayName: "Not Found Target Author",
+        createdAt: 1_700_000_011_300,
+        updatedAt: 1_700_000_011_300,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe12",
+        slug: "draft-restore-not-found-target",
+        createdAt: 1_700_000_011_301,
+        updatedAt: 1_700_000_011_301,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe13",
+        version: 1,
+        title: "Not found target source",
+        contentVersion: 1,
+        contentJson: JSON.stringify({
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Target source" }] }],
+        }),
+        excerpt: "Target source excerpt",
+        metadataJson: JSON.stringify({ stage: "target" }),
+        createdAt: 1_700_000_011_302,
+      },
+    });
+    const foreign = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe14",
+        accessSubject: "subject-draft-restore-not-found-foreign",
+        displayName: "Not Found Foreign Author",
+        createdAt: 1_700_000_011_303,
+        updatedAt: 1_700_000_011_303,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe15",
+        slug: "draft-restore-not-found-foreign",
+        createdAt: 1_700_000_011_304,
+        updatedAt: 1_700_000_011_304,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe16",
+        version: 1,
+        title: "Not found foreign source",
+        contentVersion: 1,
+        contentJson: JSON.stringify({
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Foreign source" }] }],
+        }),
+        excerpt: "Foreign source excerpt",
+        metadataJson: JSON.stringify({ stage: "foreign" }),
+        createdAt: 1_700_000_011_305,
+      },
+    });
+    const targetBeforeRejectedRestore = await repository.getPostAggregate(target.post.id);
+    const foreignBeforeRejectedRestore = await repository.getPostAggregate(foreign.post.id);
+    const targetDraftBeforeRejectedRestore = await repository.getDraft(target.post.id);
+    const foreignDraftBeforeRejectedRestore = await repository.getDraft(foreign.post.id);
+    const restoreAuthorId = target.author.id;
+
+    await expect(
+      repository.restoreDraft({
+        postId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe17",
+        sourceRevisionId: target.revision.id,
+        expectedDraftVersion: 1,
+        expectedRevisionVersion: 1,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe18",
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_011_306,
+        updatedAt: 1_700_000_011_307,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+      message: "post was not found",
+    });
+
+    await expect(
+      repository.restoreDraft({
+        postId: target.post.id,
+        sourceRevisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe19",
+        expectedDraftVersion: 1,
+        expectedRevisionVersion: 1,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe1a",
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_011_308,
+        updatedAt: 1_700_000_011_309,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+      message: "post revision was not found",
+    });
+    await expect(
+      repository.restoreDraft({
+        postId: target.post.id,
+        sourceRevisionId: foreign.revision.id,
+        expectedDraftVersion: 1,
+        expectedRevisionVersion: 1,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe1b",
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_011_310,
+        updatedAt: 1_700_000_011_311,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+      message: "post revision was not found",
+    });
+    await expect(repository.getPostAggregate(target.post.id)).resolves.toEqual(
+      targetBeforeRejectedRestore,
+    );
+    await expect(repository.getPostAggregate(foreign.post.id)).resolves.toEqual(
+      foreignBeforeRejectedRestore,
+    );
+    await expect(repository.getDraft(target.post.id)).resolves.toEqual(
+      targetDraftBeforeRejectedRestore,
+    );
+    await expect(repository.getDraft(foreign.post.id)).resolves.toEqual(
+      foreignDraftBeforeRejectedRestore,
+    );
+
+    await env.TEST_DB.prepare("DELETE FROM post_drafts WHERE post_id = ?")
+      .bind(target.post.id)
+      .run();
+    await expect(
+      repository.restoreDraft({
+        postId: target.post.id,
+        sourceRevisionId: target.revision.id,
+        expectedDraftVersion: 1,
+        expectedRevisionVersion: 1,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe1c",
+        authorId: restoreAuthorId,
+        createdAt: 1_700_000_011_312,
+        updatedAt: 1_700_000_011_313,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+      message: "post draft was not found",
+    });
+  });
+
+  it("maps an unexpected restore batch failure to a stable write error", async () => {
+    const database = new Proxy(env.TEST_DB, {
+      get(target, property, receiver) {
+        if (property === "batch") {
+          return () => Promise.reject(new Error("SQL restore failure details"));
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const repository = createEditorialRepository(database);
+
+    let error: unknown;
+    try {
+      await repository.restoreDraft({
+        postId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe21",
+        sourceRevisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe22",
+        expectedDraftVersion: 1,
+        expectedRevisionVersion: 1,
+        revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe23",
+        authorId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3fe24",
+        createdAt: 1_700_000_011_400,
+        updatedAt: 1_700_000_011_401,
+      });
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(RepositoryError);
+    expect(error).toMatchObject({
+      code: RepositoryErrorCode.WRITE_FAILED,
+      message: "Failed to restore post draft",
+    });
+    expect((error as RepositoryError).message).not.toMatch(/INSERT|post_revisions|SQL/i);
+  });
+
+  it("rolls back a restore when the draft update violates a database constraint", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff31",
+        accessSubject: "subject-draft-restore-batch-rollback",
+        displayName: "Restore Batch Rollback Author",
+        createdAt: 1_700_000_011_500,
+        updatedAt: 1_700_000_011_500,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff32",
+        slug: "draft-restore-batch-rollback",
+        createdAt: 1_700_000_011_501,
+        updatedAt: 1_700_000_011_501,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff33",
+        version: 1,
+        title: "Restore rollback source",
+        contentVersion: 1,
+        contentJson: JSON.stringify({
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Source" }] }],
+        }),
+        excerpt: "Restore rollback source excerpt",
+        metadataJson: JSON.stringify({ stage: "source" }),
+        createdAt: 1_700_000_011_502,
+      },
+    });
+    const beforeDraft = await repository.getDraft(initial.post.id);
+    const beforeAggregate = await repository.getPostAggregate(initial.post.id);
+    const restoredRevisionId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3ff34";
+
+    await expect(
+      repository.restoreDraft({
+        postId: initial.post.id,
+        sourceRevisionId: initial.revision.id,
+        expectedDraftVersion: beforeDraft.version,
+        expectedRevisionVersion: initial.revision.version,
+        revisionId: restoredRevisionId,
+        authorId: initial.author.id,
+        createdAt: 1_700_000_011_503,
+        updatedAt: -1,
+      }),
+    ).rejects.toMatchObject({
+      code: RepositoryErrorCode.WRITE_FAILED,
+      message: "Failed to restore post draft",
+    });
+
+    await expect(repository.getDraft(initial.post.id)).resolves.toEqual(beforeDraft);
+    await expect(repository.getPostAggregate(initial.post.id)).resolves.toEqual(beforeAggregate);
+    await expect(repository.getRevision(restoredRevisionId)).rejects.toMatchObject({
+      code: RepositoryErrorCode.NOT_FOUND,
+    });
+  });
 });
