@@ -1,10 +1,14 @@
 import {
+  Extension,
   type JSONContent,
+  Node,
   type Editor as TiptapEditorInstance,
   wrappingInputRule,
 } from "@tiptap/core";
 import { BulletList, ListItem, ListKit, OrderedList, TaskItem } from "@tiptap/extension-list";
-import { TableKit } from "@tiptap/extension-table";
+import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Plugin } from "@tiptap/pm/state";
 import { EditorContent as TiptapEditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -41,9 +45,102 @@ export type StudioEditorProps = {
   onChange?: (content: EditorContent) => void;
 };
 
+const StudioDocument = Node.create({
+  name: "doc",
+  topNode: true,
+  content: "(block | tableBlock)+",
+});
+
+const StudioTable = Table.extend({
+  content: "tableRow{2,}",
+  group: "tableBlock",
+});
+
+const StudioTableCell = TableCell.extend({
+  content: "paragraph",
+});
+
+const StudioTableHeader = TableHeader.extend({
+  content: "paragraph",
+});
+
+const StudioTableRow = TableRow.extend({
+  content: "(tableCell | tableHeader)+",
+});
+
+function hasSupportedTableStructure(document: ProseMirrorNode): boolean {
+  let valid = true;
+
+  document.descendants((node, _pos, parent) => {
+    if (!valid) return false;
+
+    if (node.type.name === "table") {
+      if (parent?.type.name !== "doc" || node.childCount < 2) {
+        valid = false;
+        return false;
+      }
+      const firstRow = node.child(0);
+      const columnCount = firstRow.childCount;
+      if (columnCount === 0 || columnCount > 20 || node.childCount > 100) {
+        valid = false;
+        return false;
+      }
+      let cellCount = 0;
+      node.forEach((row, rowIndex) => {
+        if (row.type.name !== "tableRow" || row.childCount !== columnCount) {
+          valid = false;
+          return;
+        }
+        row.forEach((cell) => {
+          const expectedType = rowIndex === 0 ? "tableHeader" : "tableCell";
+          if (
+            cell.type.name !== expectedType ||
+            cell.childCount !== 1 ||
+            cell.firstChild?.type.name !== "paragraph" ||
+            cell.attrs.colspan !== 1 ||
+            cell.attrs.rowspan !== 1 ||
+            cell.attrs.colwidth !== null ||
+            (cell.attrs.align !== null && cell.attrs.align !== undefined)
+          ) {
+            valid = false;
+          }
+          cellCount += 1;
+        });
+      });
+      if (cellCount > 400) valid = false;
+    }
+
+    if (
+      (node.type.name === "tableRow" && parent?.type.name !== "table") ||
+      ((node.type.name === "tableCell" || node.type.name === "tableHeader") &&
+        parent?.type.name !== "tableRow")
+    ) {
+      valid = false;
+      return false;
+    }
+
+    return true;
+  });
+
+  return valid;
+}
+
+const StudioTableStructureGuard = Extension.create({
+  name: "studioTableStructureGuard",
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        filterTransaction: (transaction) => hasSupportedTableStructure(transaction.doc),
+      }),
+    ];
+  },
+});
+
 const editorExtensions = [
   StarterKit.configure({
     bulletList: false,
+    document: false,
     listItem: false,
     listKeymap: false,
     orderedList: false,
@@ -87,13 +184,16 @@ const editorExtensions = [
       return [markdownTaskRule, ...parentRules];
     },
   }),
-  TableKit.configure({
-    table: {
-      lastColumnResizable: false,
-      renderWrapper: false,
-      resizable: false,
-    },
+  StudioDocument,
+  StudioTable.configure({
+    lastColumnResizable: false,
+    renderWrapper: false,
+    resizable: false,
   }),
+  StudioTableCell,
+  StudioTableHeader,
+  StudioTableRow,
+  StudioTableStructureGuard,
 ];
 
 function toRawTiptapDoc(value: JSONContent): RawTiptapDoc {
@@ -258,15 +358,22 @@ function findSlashState(editor: TiptapEditorInstance): SlashState | null {
   return { from, query, to: selection.from };
 }
 
-function getSlashCommands(query: string): readonly SlashCommand[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) return slashCommands;
+function canInsertTableAtSelection(editor: TiptapEditorInstance): boolean {
+  const { $from } = editor.state.selection;
+  return $from.depth === 1 && $from.parent.isTextblock && $from.parent.type.name !== "codeBlock";
+}
 
-  return slashCommands.filter(
-    ({ keywords, label }) =>
-      label.toLowerCase().startsWith(normalizedQuery) ||
-      keywords.some((keyword) => keyword.startsWith(normalizedQuery)),
-  );
+function getSlashCommands(query: string, tableAvailable: boolean): readonly SlashCommand[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  const commands = normalizedQuery
+    ? slashCommands.filter(
+        ({ keywords, label }) =>
+          label.toLowerCase().startsWith(normalizedQuery) ||
+          keywords.some((keyword) => keyword.startsWith(normalizedQuery)),
+      )
+    : slashCommands;
+
+  return tableAvailable ? commands : commands.filter(({ name }) => name !== "table");
 }
 
 export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(function StudioEditor(
@@ -370,13 +477,16 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
     chain.run();
   };
 
-  const visibleSlashCommands = slashState ? getSlashCommands(slashState.query) : [];
+  const visibleSlashCommands = slashState
+    ? getSlashCommands(slashState.query, Boolean(editor && canInsertTableAtSelection(editor)))
+    : [];
   const activeSlashIndex = visibleSlashCommands.length
     ? Math.min(slashIndex, visibleSlashCommands.length - 1)
     : 0;
 
   const runSlashCommand = (command: SlashCommand) => {
     if (!editor || !slashState) return;
+    if (command.name === "table" && !canInsertTableAtSelection(editor)) return;
 
     const chain = editor.chain().focus().deleteRange({
       from: slashState.from,

@@ -201,17 +201,22 @@ function normalizeDocument(input: unknown, path: Path, context: NormalizationCon
       context.add([...path, "type"], "invalid_document_type", "Document type must be doc");
     }
 
-    const content = normalizeChildren(value.content, [...path, "content"], context);
+    const content = normalizeChildren(value.content, [...path, "content"], context, "doc");
     if (content === undefined) return undefined;
     return { type: "doc", content } satisfies RawTiptapDoc;
   });
 }
 
-function normalizeChildren(input: unknown, path: Path, context: NormalizationContext) {
+function normalizeChildren(
+  input: unknown,
+  path: Path,
+  context: NormalizationContext,
+  parentType: string,
+) {
   return withArray(input, path, context, (values) => {
     const content: RawTiptapNode[] = [];
     for (let index = 0; index < values.length && !context.isHalted; index += 1) {
-      const node = normalizeNode(values[index], [...path, index], context);
+      const node = normalizeNode(values[index], [...path, index], context, parentType);
       if (node === undefined) return undefined;
       content.push(node);
     }
@@ -219,7 +224,12 @@ function normalizeChildren(input: unknown, path: Path, context: NormalizationCon
   });
 }
 
-function normalizeNode(input: unknown, path: Path, context: NormalizationContext) {
+function normalizeNode(
+  input: unknown,
+  path: Path,
+  context: NormalizationContext,
+  parentType: string,
+) {
   return withRecord(input, path, context, (value) => {
     if (!hasOnlyKeys(value, ["type", "attrs", "content", "text", "marks"], path, context)) {
       return undefined;
@@ -249,7 +259,7 @@ function normalizeNode(input: unknown, path: Path, context: NormalizationContext
               ? normalizeJsonRecord(value.attrs, [...path, "attrs"], context)
               : undefined;
     const content = hasOwn(value, "content")
-      ? normalizeChildren(value.content, [...path, "content"], context)
+      ? normalizeChildren(value.content, [...path, "content"], context, value.type)
       : undefined;
     const text = hasOwn(value, "text")
       ? normalizeText(value.text, [...path, "text"], context)
@@ -267,6 +277,19 @@ function normalizeNode(input: unknown, path: Path, context: NormalizationContext
       return undefined;
     }
 
+    if ((value.type === "table" || value.type === "tableRow") && hasAttrs) {
+      context.add(
+        [...path, "attrs"],
+        "invalid_table_attrs",
+        "Tables and table rows do not accept attributes",
+      );
+      return undefined;
+    }
+
+    if (!validateTableStructure(value.type, parentType, content, path, context)) {
+      return undefined;
+    }
+
     return {
       type: value.type,
       ...(attrs === undefined ? {} : { attrs }),
@@ -275,6 +298,139 @@ function normalizeNode(input: unknown, path: Path, context: NormalizationContext
       ...(marks === undefined ? {} : { marks }),
     } satisfies RawTiptapNode;
   });
+}
+
+function validateTableStructure(
+  type: string,
+  parentType: string,
+  content: readonly RawTiptapNode[] | undefined,
+  path: Path,
+  context: NormalizationContext,
+): boolean {
+  if (type === "table" && parentType !== "doc") {
+    context.add(
+      [...path, "type"],
+      "invalid_table_nesting",
+      "Tables are only allowed as top-level document blocks",
+    );
+    return false;
+  }
+
+  if (type === "tableRow" && parentType !== "table") {
+    context.add(
+      [...path, "type"],
+      "invalid_table_nesting",
+      "Table rows are only allowed inside tables",
+    );
+    return false;
+  }
+
+  if ((type === "tableCell" || type === "tableHeader") && parentType !== "tableRow") {
+    context.add(
+      [...path, "type"],
+      "invalid_table_nesting",
+      "Table cells are only allowed inside table rows",
+    );
+    return false;
+  }
+
+  if (type === "table") {
+    if (content === undefined || content.length < 2) {
+      context.add(
+        [...path, "content"],
+        "invalid_table_content",
+        "Tables must contain at least two rows",
+      );
+      return false;
+    }
+    if (content.length > 100) {
+      context.add(
+        [...path, "content"],
+        "invalid_table_content",
+        "Tables must contain no more than 100 rows",
+      );
+      return false;
+    }
+    if (content.some((child) => child.type !== "tableRow")) {
+      context.add(
+        [...path, "content"],
+        "invalid_table_content",
+        "Table content must contain tableRow nodes",
+      );
+      return false;
+    }
+
+    const columnCount = content[0]?.content?.length;
+    if (columnCount === undefined || columnCount > 20) {
+      context.add(
+        [...path, "content", 0, "content"],
+        "invalid_table_content",
+        "Tables must contain no more than 20 columns",
+      );
+      return false;
+    }
+    if (content.reduce((count, row) => count + (row.content?.length ?? 0), 0) > 400) {
+      context.add(
+        [...path, "content"],
+        "invalid_table_content",
+        "Tables must contain no more than 400 cells",
+      );
+      return false;
+    }
+    for (const [index, row] of content.entries()) {
+      if (columnCount !== row.content?.length) {
+        context.add(
+          [...path, "content", index, "content"],
+          "invalid_table_content",
+          "Table rows must contain the same number of cells",
+        );
+        return false;
+      }
+      const expectedCellType = index === 0 ? "tableHeader" : "tableCell";
+      if (row.content?.some((cell) => cell.type !== expectedCellType)) {
+        context.add(
+          [...path, "content", index, "content"],
+          "invalid_table_content",
+          index === 0
+            ? "The first table row must contain tableHeader nodes"
+            : "Table body rows must contain tableCell nodes",
+        );
+        return false;
+      }
+    }
+  }
+
+  if (type === "tableRow") {
+    if (content === undefined || content.length === 0) {
+      context.add(
+        [...path, "content"],
+        "invalid_table_content",
+        "Table rows must contain at least one cell",
+      );
+      return false;
+    }
+    if (content.some((child) => child.type !== "tableCell" && child.type !== "tableHeader")) {
+      context.add(
+        [...path, "content"],
+        "invalid_table_content",
+        "Table rows must contain table cells",
+      );
+      return false;
+    }
+  }
+
+  if (type === "tableCell" || type === "tableHeader") {
+    if (content === undefined || content.length !== 1 || content[0]?.type !== "paragraph") {
+      context.add(
+        [...path, "content"],
+        "invalid_table_cell_content",
+        "Table cells must contain exactly one paragraph",
+      );
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function normalizeTaskItemAttrs(input: unknown, path: Path, context: NormalizationContext) {

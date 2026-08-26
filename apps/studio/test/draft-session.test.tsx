@@ -532,4 +532,227 @@ describe("draft session", () => {
       },
     });
   });
+
+  it("persists the mounted editor JSON through the canonical outbound route", async () => {
+    installJsdomGeometry();
+    const initialContent = createEditorContent({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Lead" }] },
+        {
+          type: "orderedList",
+          attrs: { start: 3, type: null },
+          content: [
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Numbered" }] }],
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Linked",
+              marks: [
+                {
+                  type: "link",
+                  attrs: {
+                    href: "https://example.test/docs",
+                    rel: "author-supplied",
+                    target: "_blank",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "before" },
+            { type: "hardBreak" },
+            { type: "text", text: "after" },
+          ],
+        },
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: true },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Done" }] }],
+            },
+          ],
+        },
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }],
+                },
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Role" }] }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Ada" }] }],
+                },
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Engineer" }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const saveDraft = vi.fn(async (request: DraftSaveRequest) => ({
+      draftVersion: request.expectedDraftVersion + 1,
+      ok: true as const,
+    }));
+    const user = userEvent.setup();
+
+    render(
+      <App
+        initialContent={initialContent}
+        initialDraftVersion={1}
+        persistence={{ saveDraft }}
+        autosaveDelay={0}
+      />,
+    );
+
+    const body = screen.getByRole("textbox", { name: "Body" });
+    const proseMirror = body as HTMLElement;
+    const leadText = proseMirror.querySelector("p")?.firstChild;
+    if (!leadText) throw new Error("Lead paragraph is missing");
+
+    proseMirror.focus();
+    const leadRange = document.createRange();
+    leadRange.setStart(leadText, 0);
+    leadRange.setEnd(leadText, leadText.textContent?.length ?? 0);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(leadRange);
+    document.dispatchEvent(new Event("selectionchange"));
+    fireEvent.mouseUp(proseMirror);
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+    vi.spyOn(window, "prompt").mockReturnValue("javascript:alert(1)");
+    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    expect(saveDraft).not.toHaveBeenCalled();
+
+    const link = proseMirror.querySelector("a");
+    expect(link?.getAttribute("href")).toBe("https://example.test/docs");
+
+    proseMirror.focus();
+    const cursorRange = document.createRange();
+    cursorRange.setStart(leadText, leadText.textContent?.length ?? 0);
+    cursorRange.setEnd(leadText, leadText.textContent?.length ?? 0);
+    selection?.removeAllRanges();
+    selection?.addRange(cursorRange);
+    document.dispatchEvent(new Event("selectionchange"));
+    await user.keyboard("!");
+
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledTimes(1));
+    expect(saveDraft.mock.calls[0]?.[0]).toEqual({
+      expectedDraftVersion: 1,
+      title: "",
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "Lead!" }] },
+          {
+            type: "orderedList",
+            attrs: { start: 3 },
+            content: [
+              {
+                type: "listItem",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "Numbered" }] }],
+              },
+            ],
+          },
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "Linked",
+                marks: [{ type: "link", attrs: { href: "https://example.test/docs" } }],
+              },
+            ],
+          },
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "before" },
+              { type: "hardBreak" },
+              { type: "text", text: "after" },
+            ],
+          },
+          {
+            type: "taskList",
+            content: [
+              {
+                type: "taskItem",
+                attrs: { checked: true },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "Done" }] }],
+              },
+            ],
+          },
+          {
+            type: "table",
+            content: [
+              {
+                type: "tableRow",
+                content: [
+                  {
+                    type: "tableHeader",
+                    attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "Name" }] }],
+                  },
+                  {
+                    type: "tableHeader",
+                    attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "Role" }] }],
+                  },
+                ],
+              },
+              {
+                type: "tableRow",
+                content: [
+                  {
+                    type: "tableCell",
+                    attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "Ada" }] }],
+                  },
+                  {
+                    type: "tableCell",
+                    attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "Engineer" }] }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
 });

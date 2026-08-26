@@ -5,7 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StudioEditor, type StudioEditorHandle } from "../src/editor";
-import { createEditorContent, type EditorContent } from "../src/editor-content";
+import {
+  createEditorContent,
+  type EditorContent,
+  normalizeEditorContent,
+} from "../src/editor-content";
 
 afterEach(() => {
   cleanup();
@@ -313,6 +317,226 @@ describe("StudioEditor", () => {
     editorRef.current?.setContent(content);
 
     expect(editorRef.current?.getContent()).toEqual(content);
+  });
+
+  it("rejects nested or malformed tables without replacing mounted content", () => {
+    const valid = createEditorContent({
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph" }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph" }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const invalidNested = {
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "blockquote",
+            content: [
+              { type: "paragraph" },
+              {
+                type: "table",
+                content: [
+                  {
+                    type: "tableRow",
+                    content: [
+                      {
+                        type: "tableHeader",
+                        attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                        content: [{ type: "paragraph" }],
+                      },
+                    ],
+                  },
+                  {
+                    type: "tableRow",
+                    content: [
+                      {
+                        type: "tableCell",
+                        attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                        content: [{ type: "paragraph" }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as EditorContent;
+    const invalidCell = {
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "table",
+            content: [
+              {
+                type: "tableRow",
+                content: [
+                  {
+                    type: "tableHeader",
+                    attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                    content: [{ type: "paragraph" }],
+                  },
+                ],
+              },
+              {
+                type: "tableRow",
+                content: [
+                  {
+                    type: "tableCell",
+                    attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                    content: [{ type: "paragraph" }, { type: "paragraph" }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as EditorContent;
+
+    expect(normalizeEditorContent(invalidNested)).toMatchObject({ ok: false });
+    expect(normalizeEditorContent(invalidCell)).toMatchObject({ ok: false });
+
+    expect(() => render(<StudioEditor content={invalidNested} />)).toThrow(
+      "Studio editor content normalization failed",
+    );
+    cleanup();
+
+    const editorRef = createRef<StudioEditorHandle>();
+    render(<StudioEditor content={valid} ref={editorRef} />);
+
+    expect(() => editorRef.current?.setContent(invalidNested)).toThrow(
+      "Studio editor content normalization failed",
+    );
+    expect(() => editorRef.current?.setContent(invalidCell)).toThrow(
+      "Studio editor content normalization failed",
+    );
+    expect(editorRef.current?.getContent()).toEqual(valid);
+  });
+
+  it("does not offer the table slash command inside a nested block", async () => {
+    installJsdomGeometry();
+    const user = userEvent.setup();
+    const content = createEditorContent({
+      type: "doc",
+      content: [{ type: "blockquote", content: [{ type: "paragraph" }] }],
+    });
+
+    render(<StudioEditor content={content} />);
+    const proseMirror = document.querySelector<HTMLElement>(".ProseMirror");
+    if (!proseMirror) throw new Error("Editor content is missing");
+
+    proseMirror.focus();
+    await user.type(proseMirror, "/table");
+
+    expect(screen.queryByRole("option", { name: "Table" })).toBeNull();
+    expect(proseMirror.textContent).toContain("/table");
+    fireEvent.keyDown(proseMirror, { key: "Enter" });
+    expect(proseMirror.textContent).toContain("/table");
+  });
+
+  it("keeps each table cell as one paragraph through in-cell keyboard and paste input", async () => {
+    installJsdomGeometry();
+    const user = userEvent.setup();
+    const editorRef = createRef<StudioEditorHandle>();
+    const content = createEditorContent({
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph" }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [{ type: "paragraph" }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<StudioEditor content={content} ref={editorRef} />);
+    const proseMirror = document.querySelector<HTMLElement>(".ProseMirror");
+    const paragraph = proseMirror?.querySelector("td p");
+    if (!proseMirror || !paragraph) throw new Error("Table cell is missing");
+
+    proseMirror.focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(paragraph);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+
+    await user.type(proseMirror, "* ");
+    fireEvent.keyDown(proseMirror, { key: "Enter" });
+    fireEvent.paste(proseMirror, {
+      clipboardData: {
+        getData: (type: string) =>
+          type === "text/html"
+            ? "<table><tr><td>Nested</td></tr></table>"
+            : type === "text/plain"
+              ? "Nested"
+              : "",
+      },
+    });
+
+    const table = editorRef.current?.getContent().content.content[0];
+    expect(table?.type).toBe("table");
+    for (const row of table?.content ?? []) {
+      for (const cell of row.content ?? []) {
+        expect(cell.content).toHaveLength(1);
+        expect(cell.content?.[0]?.type).toBe("paragraph");
+      }
+    }
+    expect(proseMirror.querySelectorAll("td > p")).toHaveLength(1);
+    expect(proseMirror.querySelectorAll("td > table")).toHaveLength(0);
+    expect(proseMirror.querySelectorAll("table")).toHaveLength(1);
   });
 
   it("shows an icon-led formatting toolbar for a non-empty selection", async () => {
