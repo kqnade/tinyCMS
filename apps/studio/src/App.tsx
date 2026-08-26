@@ -468,6 +468,8 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
       if (api === undefined || selectedPost === null || workspaceAction !== null) return;
       setWorkspaceAction("restore");
       try {
+        await session.save();
+        if (session.getSaveState() !== "saved") return;
         const snapshot = session.getSnapshot();
         const result = await api.restoreRevision(selectedPost.id, revision.id, {
           expectedDraftVersion: snapshot.draftVersion,
@@ -515,7 +517,8 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
       session.saveState === "conflict" ||
       session.saveState === "error");
   const statusLabel = statusLabels[session.saveState];
-  const editorBusy = workspaceState === "loading" || loadingPostId !== null;
+  const editorBusy =
+    workspaceAction !== null || workspaceState === "loading" || loadingPostId !== null;
 
   return (
     <div className="studio-shell" data-panel-open={panelOpen}>

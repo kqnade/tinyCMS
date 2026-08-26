@@ -565,6 +565,96 @@ describe("Studio editorial workspace", () => {
     );
   });
 
+  it("flushes a dirty draft before restoring a revision and uses its new version", async () => {
+    const saveDraft = vi.fn<EditorialApi["saveDraft"]>(async (postId, request) =>
+      post(postId, request.title, "Saved body", request.expectedDraftVersion + 1, 1),
+    );
+    const api = createMockApi({ saveDraft });
+    render(<App api={api} autosaveDelay={60_000} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+    await openStudioMenu();
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await waitFor(() => expect(api.listRevisions).toHaveBeenCalledWith(firstId, { limit: 20 }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "Local title" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore revision 1" }));
+    await waitFor(() =>
+      expect(saveDraft).toHaveBeenCalledWith(
+        firstId,
+        expect.objectContaining({ expectedDraftVersion: 1, title: "Local title" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(api.restoreRevision).toHaveBeenCalledWith(firstId, firstRevisionId, {
+        expectedDraftVersion: 2,
+        expectedRevisionVersion: 1,
+      }),
+    );
+  });
+
+  it("retains local writing and skips restore when its flush conflicts", async () => {
+    const api = createMockApi({
+      saveDraft: vi.fn<EditorialApi["saveDraft"]>(async () => {
+        throw new EditorialApiError(409, ErrorCode.CONFLICT);
+      }),
+    });
+    render(<App api={api} autosaveDelay={60_000} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+    await openStudioMenu();
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await waitFor(() => expect(api.listRevisions).toHaveBeenCalledWith(firstId, { limit: 20 }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "Keep local title" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore revision 1" }));
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledTimes(1));
+    expect(api.restoreRevision).not.toHaveBeenCalled();
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+      "Keep local title",
+    );
+    expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("First body");
+  });
+
+  it("locks the editor while a restore request can replace its content", async () => {
+    let resolveRestore:
+      | ((result: Awaited<ReturnType<EditorialApi["restoreRevision"]>>) => void)
+      | undefined;
+    const api = createMockApi({
+      restoreRevision: vi.fn<EditorialApi["restoreRevision"]>(
+        () =>
+          new Promise((resolve) => {
+            resolveRestore = resolve;
+          }),
+      ),
+    });
+    render(<App api={api} autosaveDelay={60_000} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+    await openStudioMenu();
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await waitFor(() => expect(api.listRevisions).toHaveBeenCalledWith(firstId, { limit: 20 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore revision 1" }));
+    await waitFor(() => expect(api.restoreRevision).toHaveBeenCalled());
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByRole("textbox", { name: "Body" }).getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    resolveRestore?.({
+      post: post(firstId, "Restored post", "Restored body", 2, 2),
+      revision: revision(firstId, "018f0e5d-6a25-7b01-8f4a-7d62a5d3e405", "Restored post", 2),
+    });
+    await waitFor(() =>
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+        "Restored post",
+      ),
+    );
+  });
+
   it("checkpoints after saving and restores a selected revision with both versions", async () => {
     const api = createMockApi();
     render(<App api={api} autosaveDelay={0} />);
