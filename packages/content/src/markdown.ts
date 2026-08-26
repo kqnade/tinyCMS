@@ -3,6 +3,7 @@ import {
   type ContentBlock,
   type ContentBlockquoteNode,
   type ContentCodeBlockNode,
+  type ContentInlineNode,
   type ContentListItemChild,
   type ContentListNode,
   type ContentTableNode,
@@ -38,11 +39,18 @@ export function renderMarkdown(
     resolveMediaUrl,
     mediaUrls: new Map(),
   };
-  return trimTrailingNewlines(renderBlocks(document.content, context));
+  return renderBlocks(document.content, context);
 }
 
 function renderBlocks(blocks: readonly ContentBlock[], context: RenderContext): string {
-  return blocks.map((block) => trimTrailingNewlines(renderBlock(block, context))).join("\n\n");
+  return blocks
+    .map((block) => trimTrailingNewlines(renderBlock(block, context), hasTrailingHardBreak(block)))
+    .reduce((output, block, index) => {
+      if (index === 0) {
+        return block;
+      }
+      return `${output}${output.endsWith("\\\n") ? "\n" : "\n\n"}${block}`;
+    }, "");
 }
 
 function renderBlock(block: ContentBlock, context: RenderContext): string {
@@ -89,68 +97,76 @@ function renderBlock(block: ContentBlock, context: RenderContext): string {
 }
 
 function renderList(block: ContentListNode, context: RenderContext): string {
-  return block.content
-    .map((item, index) => {
-      const markerText = block.type === "bulletList" ? "-" : `${block.attrs.start + index}.`;
-      const marker = `${markerText} `;
-      const continuation = " ".repeat(marker.length);
-      const firstChild = item.content[0];
-      if (firstChild === undefined) {
-        return marker.trimEnd();
-      }
-
-      const first = renderListItemChild(firstChild, context);
-      const itemLines = first
-        .split("\n")
-        .map((line, lineIndex) =>
-          lineIndex === 0 ? `${marker}${line}` : `${continuation}${line}`,
-        );
-      for (const child of item.content.slice(1)) {
-        itemLines.push("");
-        const renderedChild = renderListItemChild(child, context);
-        itemLines.push(
-          ...renderedChild
-            .split("\n")
-            .map((line) => (line.length === 0 ? line : `${continuation}${line}`)),
-        );
-      }
-      return itemLines.join("\n");
-    })
-    .join("\n");
+  const items = block.content.map((item, index) => {
+    const markerText = block.type === "bulletList" ? "-" : `${block.attrs.start + index}.`;
+    return renderListItem(item.content, `${markerText} `, context);
+  });
+  return joinListItems(items);
 }
 
 function renderListItemChild(child: ContentListItemChild, context: RenderContext): string {
   return renderBlock(child, context);
 }
 
-function renderTaskList(block: ContentTaskListNode, context: RenderContext): string {
-  return block.content
-    .map((item) => {
-      const marker = item.attrs.checked ? "- [x] " : "- [ ] ";
-      const continuation = " ".repeat(marker.length);
-      const firstChild = item.content[0];
-      if (firstChild === undefined) {
-        return marker.trimEnd();
-      }
+function renderListItem(
+  children: readonly ContentListItemChild[],
+  marker: string,
+  context: RenderContext,
+): string {
+  const firstChild = children[0];
+  if (firstChild === undefined) {
+    return marker.trimEnd();
+  }
 
-      const first = renderBlock(firstChild, context);
-      const itemLines = first
-        .split("\n")
-        .map((line, lineIndex) =>
-          lineIndex === 0 ? `${marker}${line}` : `${continuation}${line}`,
-        );
-      for (const child of item.content.slice(1)) {
-        itemLines.push("");
-        const renderedChild = renderBlock(child, context);
-        itemLines.push(
-          ...renderedChild
-            .split("\n")
-            .map((line) => (line.length === 0 ? line : `${continuation}${line}`)),
-        );
-      }
-      return itemLines.join("\n");
-    })
+  const continuation = " ".repeat(marker.length);
+  let result = renderListItemChildWithIndent(firstChild, marker, continuation, true, context);
+  for (const child of children.slice(1)) {
+    const separator = result.endsWith("\n") ? "\n" : "\n\n";
+    result += `${separator}${renderListItemChildWithIndent(child, marker, continuation, false, context)}`;
+  }
+  return result;
+}
+
+function renderListItemChildWithIndent(
+  child: ContentListItemChild,
+  marker: string,
+  continuation: string,
+  first: boolean,
+  context: RenderContext,
+): string {
+  const rendered = renderListItemChild(child, context);
+  const preservesHardBreak = hasTrailingHardBreak(child);
+  const lines = rendered.split("\n");
+  if (preservesHardBreak && rendered.endsWith("\\\n") && lines.at(-1) === "") {
+    lines.pop();
+  }
+  const indented = lines
+    .map((line, lineIndex) =>
+      first && lineIndex === 0
+        ? `${marker}${line}`
+        : line.length === 0
+          ? line
+          : `${continuation}${line}`,
+    )
     .join("\n");
+  return preservesHardBreak && rendered.endsWith("\\\n") ? `${indented}\n` : indented;
+}
+
+function joinListItems(items: readonly string[]): string {
+  return items.reduce((output, item, index) => {
+    if (index === 0) {
+      return item;
+    }
+    return `${output}${output.endsWith("\\\n") ? "" : "\n"}${item}`;
+  }, "");
+}
+
+function renderTaskList(block: ContentTaskListNode, context: RenderContext): string {
+  const items = block.content.map((item) => {
+    const marker = item.attrs.checked ? "- [x] " : "- [ ] ";
+    return renderListItem(item.content, marker, context);
+  });
+  return joinListItems(items);
 }
 
 function renderTable(block: ContentTableNode): string {
@@ -233,10 +249,18 @@ type InlineRenderOptions = {
 };
 
 function renderInline(
-  content: readonly ContentTextNode[] | undefined,
+  content: readonly ContentInlineNode[] | undefined,
   options: InlineRenderOptions = {},
 ): string {
-  return (content ?? []).map((node) => renderText(node, options)).join("");
+  return (content ?? []).map((node) => renderInlineNode(node, options)).join("");
+}
+
+function renderInlineNode(node: ContentInlineNode, options: InlineRenderOptions): string {
+  return node.type === "hardBreak"
+    ? options.tableCell === true
+      ? "<br>"
+      : "\\\n"
+    : renderText(node, options);
 }
 
 function renderText(node: ContentTextNode, options: InlineRenderOptions = {}): string {
@@ -439,6 +463,32 @@ function escapeTablePipe(value: string): string {
   return value.replaceAll("|", "\\|");
 }
 
-function trimTrailingNewlines(value: string): string {
+function trimTrailingNewlines(value: string, preserveHardBreak = false): string {
+  if (preserveHardBreak && value.endsWith("\\\n")) {
+    return value;
+  }
   return value.replace(/\n+$/u, "");
+}
+
+function hasTrailingHardBreak(block: ContentBlock): boolean {
+  switch (block.type) {
+    case "paragraph":
+    case "heading":
+      return block.content?.at(-1)?.type === "hardBreak";
+    case "bulletList":
+    case "orderedList":
+    case "taskList": {
+      const item = block.content.at(-1);
+      const child = item?.content.at(-1);
+      return child === undefined ? false : hasTrailingHardBreak(child);
+    }
+    case "blockquote": {
+      const child = block.content.at(-1);
+      return child === undefined ? false : hasTrailingHardBreak(child);
+    }
+    case "callout":
+      return block.content.at(-1)?.content?.at(-1)?.type === "hardBreak";
+    default:
+      return false;
+  }
 }

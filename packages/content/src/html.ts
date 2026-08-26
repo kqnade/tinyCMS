@@ -1,5 +1,6 @@
 import {
   type ContentBlock,
+  type ContentInlineNode,
   type ContentListItemNode,
   type ContentListNode,
   type ContentTableNode,
@@ -168,8 +169,12 @@ function renderProviderLink(className: string, href: string, title: string): str
   return `<a class="link-card ${className}" href="${escapeHtml(href)}" rel="noopener noreferrer"><span class="link-card-title">${title}</span></a>`;
 }
 
-function renderInline(content: readonly ContentTextNode[] | undefined): string {
-  return (content ?? []).map(renderText).join("");
+function renderInline(content: readonly ContentInlineNode[] | undefined): string {
+  return (content ?? []).map(renderInlineNode).join("");
+}
+
+function renderInlineNode(node: ContentInlineNode): string {
+  return node.type === "hardBreak" ? "<br>" : renderText(node);
 }
 
 function renderText(node: ContentTextNode): string {

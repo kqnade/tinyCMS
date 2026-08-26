@@ -5,7 +5,12 @@ import {
   parseContentDocument,
   validateContentDocument,
 } from "../src/index";
-import { canonicalContentDocument, validContentDocument } from "./fixtures";
+import {
+  canonicalContentDocument,
+  tiptapDefaultLinkDocument,
+  tiptapHardBreakDocument,
+  validContentDocument,
+} from "./fixtures";
 
 type TestRecord = Record<string, unknown>;
 
@@ -75,6 +80,178 @@ describe("content document schema", () => {
 
     expect(result).toEqual({ ok: true, value: canonicalContentDocument });
     expect(validContentDocument).toEqual(original);
+  });
+
+  it("accepts the exact hardBreak node from Tiptap inline content", () => {
+    expect(validateContentDocument(CONTENT_VERSION, tiptapHardBreakDocument)).toEqual({
+      ok: true,
+      value: tiptapHardBreakDocument,
+    });
+  });
+
+  it("accepts hardBreak nodes in every paragraph-derived text context", () => {
+    const paragraph = {
+      type: "paragraph",
+      content: [{ type: "text", text: "Before" }, { type: "hardBreak" }],
+    } as const;
+    const document = {
+      type: "doc",
+      content: [
+        paragraph,
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "hardBreak" }] },
+        {
+          type: "bulletList",
+          content: [{ type: "listItem", content: [paragraph] }],
+        },
+        {
+          type: "taskList",
+          content: [
+            {
+              type: "taskItem",
+              attrs: { checked: false },
+              content: [paragraph],
+            },
+          ],
+        },
+        { type: "blockquote", content: [paragraph] },
+        { type: "callout", attrs: { kind: "info" }, content: [paragraph] },
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [paragraph],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [paragraph],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+
+    expect(validateContentDocument(CONTENT_VERSION, document)).toEqual({
+      ok: true,
+      value: document,
+    });
+  });
+
+  it("rejects hardBreak properties outside the exact inline shape", () => {
+    const properties = ["attrs", "content", "marks", "text", "extra"] as const;
+    for (const property of properties) {
+      const node = { type: "hardBreak", [property]: property === "extra" ? true : {} };
+      const result = validateContentDocument(CONTENT_VERSION, {
+        type: "doc",
+        content: [{ type: "paragraph", content: [node] }],
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.issues).toEqual([
+          {
+            code: "unknown_key",
+            message: "Unknown property is not allowed",
+            path: ["content", 0, "content", 0, property],
+          },
+        ]);
+      }
+    }
+  });
+
+  it("rejects hardBreak nodes at block, list-child, and code-block positions", () => {
+    const cases = [
+      {
+        document: { type: "doc", content: [{ type: "hardBreak" }] },
+        path: ["content", 0, "type"],
+        code: "unknown_node",
+      },
+      {
+        document: {
+          type: "doc",
+          content: [
+            {
+              type: "bulletList",
+              content: [{ type: "listItem", content: [{ type: "hardBreak" }] }],
+            },
+          ],
+        },
+        path: ["content", 0, "content", 0, "content", 0, "type"],
+        code: "invalid_nesting",
+      },
+      {
+        document: {
+          type: "doc",
+          content: [
+            {
+              type: "codeBlock",
+              attrs: { language: null },
+              content: [{ type: "hardBreak" }],
+            },
+          ],
+        },
+        path: ["content", 0, "content", 0, "type"],
+        code: "invalid_nesting",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const result = validateContentDocument(CONTENT_VERSION, testCase.document);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.issues[0]).toMatchObject({
+          code: testCase.code,
+          path: testCase.path,
+        });
+      }
+    }
+  });
+
+  it("rejects Tiptap default and arbitrary link attrs with stable paths", () => {
+    const defaultResult = validateContentDocument(CONTENT_VERSION, tiptapDefaultLinkDocument);
+    expect(defaultResult.ok).toBe(false);
+    if (!defaultResult.ok) {
+      expect(defaultResult.error.issues.map((issue) => issue.path)).toEqual([
+        ["content", 0, "content", 0, "marks", 0, "attrs", "target"],
+        ["content", 0, "content", 0, "marks", 0, "attrs", "rel"],
+        ["content", 0, "content", 0, "marks", 0, "attrs", "class"],
+      ]);
+    }
+
+    const arbitraryAttrs = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Link",
+              marks: [{ type: "link", attrs: { href: "https://example.com", dataTest: "x" } }],
+            },
+          ],
+        },
+      ],
+    } as const;
+    const arbitraryResult = validateContentDocument(CONTENT_VERSION, arbitraryAttrs);
+    expect(arbitraryResult.ok).toBe(false);
+    if (!arbitraryResult.ok) {
+      expect(arbitraryResult.error.issues.map((issue) => issue.path)).toEqual([
+        ["content", 0, "content", 0, "marks", 0, "attrs", "dataTest"],
+      ]);
+    }
   });
 
   it("accepts canonical attr-free bullet lists and rejects bullet list attrs", () => {

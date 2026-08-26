@@ -1,7 +1,7 @@
 import { HtmlRenderer, Parser } from "commonmark";
 import { describe, expect, it } from "vitest";
 import { CONTENT_VERSION, ContentValidationError, renderMarkdown } from "../src/index";
-import { canonicalContentDocument } from "./fixtures";
+import { canonicalContentDocument, tiptapHardBreakDocument } from "./fixtures";
 
 const commonmarkParser = new Parser();
 const commonmarkHtmlRenderer = new HtmlRenderer();
@@ -11,6 +11,208 @@ function renderCommonmarkHtml(markdown: string): string {
 }
 
 describe("Markdown renderer", () => {
+  it("renders Tiptap hardBreak nodes as deterministic CommonMark hard breaks", () => {
+    const output = renderMarkdown(CONTENT_VERSION, tiptapHardBreakDocument, {
+      resolveMediaUrl: () => null,
+    });
+
+    expect(output).toBe(
+      "Before\\\n[Linked &amp; ready](https://example.com/?q=1&x=2)\\\nHTML\\-looking: &lt;em&gt;unsafe&lt;/em&gt;",
+    );
+    expect(renderCommonmarkHtml(output)).toBe(
+      '<p>Before<br />\n<a href="https://example.com/?q=1&amp;x=2">Linked &amp; ready</a><br />\nHTML-looking: &lt;em&gt;unsafe&lt;/em&gt;</p>\n',
+    );
+  });
+
+  it("renders hardBreak nodes inside table cells as fixed HTML breaks", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "table",
+              content: [
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableHeader",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "Header" }] }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableRow",
+                  content: [
+                    {
+                      type: "tableCell",
+                      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            { type: "text", text: "A" },
+                            { type: "hardBreak" },
+                            { type: "text", text: "B" },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("| Header |\n| --- |\n| A<br>B |");
+  });
+
+  it("keeps hardBreak indentation stable in nested task and blockquote Markdown", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: false },
+                  content: [
+                    {
+                      type: "paragraph",
+                      content: [
+                        { type: "text", text: "Parent" },
+                        { type: "hardBreak" },
+                        { type: "text", text: "Continuation" },
+                      ],
+                    },
+                    {
+                      type: "blockquote",
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [
+                            { type: "text", text: "Quote" },
+                            { type: "hardBreak" },
+                            { type: "text", text: "next" },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe(
+      ["- [ ] Parent\\", "      Continuation", "", "      > Quote\\", "      > next"].join("\n"),
+    );
+  });
+
+  it("preserves the generated hard-break newline at the end of a block", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "End" }, { type: "hardBreak" }],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("End\\\n");
+  });
+
+  it("continues trimming a literal text newline after an escaped backslash", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Literal\\\n" }] }],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("Literal\\\\");
+  });
+
+  it("keeps one blank separator after a paragraph-ending hard break", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "First" }, { type: "hardBreak" }],
+            },
+            { type: "paragraph", content: [{ type: "text", text: "Second" }] },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("First\\\n\nSecond");
+  });
+
+  it("preserves terminal hard breaks in final bullet and task list items", () => {
+    expect(
+      renderMarkdown(
+        CONTENT_VERSION,
+        {
+          type: "doc",
+          content: [
+            {
+              type: "bulletList",
+              content: [
+                {
+                  type: "listItem",
+                  content: [
+                    {
+                      type: "paragraph",
+                      content: [{ type: "text", text: "Bullet" }, { type: "hardBreak" }],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              type: "taskList",
+              content: [
+                {
+                  type: "taskItem",
+                  attrs: { checked: false },
+                  content: [
+                    {
+                      type: "paragraph",
+                      content: [{ type: "text", text: "Task" }, { type: "hardBreak" }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { resolveMediaUrl: () => null },
+      ),
+    ).toBe("- Bullet\\\n\n- [ ] Task\\\n");
+  });
+
   it("renders checked and unchecked task items with exact GFM markers", () => {
     expect(
       renderMarkdown(

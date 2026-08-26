@@ -211,3 +211,49 @@ export const canonicalContentDocument = {
     { type: "horizontalRule" },
   ],
 } as const;
+
+export const tiptapHardBreakDocument = {
+  type: "doc",
+  content: [
+    {
+      type: "paragraph",
+      content: [
+        { type: "text", text: "Before" },
+        { type: "hardBreak" },
+        {
+          type: "text",
+          text: "Linked & ready",
+          marks: [{ type: "link", attrs: { href: "https://example.com/?q=1&x=2" } }],
+        },
+        { type: "hardBreak" },
+        { type: "text", text: "HTML-looking: <em>unsafe</em>" },
+      ],
+    },
+  ],
+} as const;
+
+export const tiptapDefaultLinkDocument = {
+  type: "doc",
+  content: [
+    {
+      type: "paragraph",
+      content: [
+        {
+          type: "text",
+          text: "Default link",
+          marks: [
+            {
+              type: "link",
+              attrs: {
+                href: "https://example.com",
+                target: "_blank",
+                rel: "noopener noreferrer nofollow",
+                class: null,
+              },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+} as const;

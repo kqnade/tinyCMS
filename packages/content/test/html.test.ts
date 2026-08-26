@@ -1,8 +1,80 @@
 import { describe, expect, it } from "vitest";
 import { CONTENT_VERSION, ContentValidationError, renderHtml } from "../src/index";
-import { canonicalContentDocument } from "./fixtures";
+import { canonicalContentDocument, tiptapHardBreakDocument } from "./fixtures";
 
 describe("HTML renderer", () => {
+  it("renders Tiptap hardBreak nodes as escaped accessible inline breaks", () => {
+    expect(
+      renderHtml(CONTENT_VERSION, tiptapHardBreakDocument, {
+        resolveMediaUrl: () => null,
+      }),
+    ).toBe(
+      '<p>Before<br><a href="https://example.com/?q=1&amp;x=2" rel="noopener noreferrer">Linked &amp; ready</a><br>HTML-looking: &lt;em&gt;unsafe&lt;/em&gt;</p>',
+    );
+  });
+
+  it("renders hardBreak nodes through nested paragraph-derived HTML contexts deterministically", () => {
+    const paragraph = {
+      type: "paragraph",
+      content: [{ type: "text", text: "A" }, { type: "hardBreak" }, { type: "text", text: "B" }],
+    } as const;
+    const input = {
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 2 }, content: paragraph.content },
+        {
+          type: "taskList",
+          content: [{ type: "taskItem", attrs: { checked: true }, content: [paragraph] }],
+        },
+        { type: "blockquote", content: [paragraph] },
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [paragraph],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                  content: [paragraph],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as const;
+    const freeze = (value: unknown): void => {
+      if (typeof value !== "object" || value === null || Object.isFrozen(value)) return;
+      Object.freeze(value);
+      for (const child of Object.values(value)) freeze(child);
+    };
+    freeze(input);
+
+    const first = renderHtml(CONTENT_VERSION, input, { resolveMediaUrl: () => null });
+    const second = renderHtml(CONTENT_VERSION, input, { resolveMediaUrl: () => null });
+
+    expect(first).toBe(
+      [
+        "<h2>A<br>B</h2>",
+        '<ul class="task-list"><li class="task-item" data-checked="true"><input type="checkbox" checked disabled aria-label="Completed task"><div class="task-item-content"><p>A<br>B</p></div></li></ul>',
+        "<blockquote><p>A<br>B</p></blockquote>",
+        '<table><thead><tr><th scope="col"><p>A<br>B</p></th></tr></thead><tbody><tr><td><p>A<br>B</p></td></tr></tbody></table>',
+      ].join("\n"),
+    );
+    expect(second).toBe(first);
+  });
+
   it("renders an empty document as an empty fragment", () => {
     expect(
       renderHtml(

@@ -77,9 +77,13 @@ export type ContentTextNode = {
   readonly marks?: readonly ContentTextMark[];
 };
 
+export type ContentHardBreakNode = { readonly type: "hardBreak" };
+
+export type ContentInlineNode = ContentTextNode | ContentHardBreakNode;
+
 export type ContentParagraphNode = {
   readonly type: "paragraph";
-  readonly content?: readonly ContentTextNode[];
+  readonly content?: readonly ContentInlineNode[];
 };
 
 export type ContentTableCellAttrs = {
@@ -113,7 +117,7 @@ export type ContentTableNode = {
 export type ContentHeadingNode = {
   readonly type: "heading";
   readonly attrs: { readonly level: 1 | 2 | 3 | 4 | 5 | 6 };
-  readonly content?: readonly ContentTextNode[];
+  readonly content?: readonly ContentInlineNode[];
 };
 
 export type ContentListItemNode = {
@@ -534,18 +538,19 @@ function parseParagraph(
     context.add([...path, "content"], "invalid_content", "Paragraph content must be an array");
     return undefined;
   }
-  const content: ContentTextNode[] = [];
+  const content: ContentInlineNode[] = [];
   if (Array.isArray(input.content)) {
     for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
-      const text = parseText(
+      const inline = parseInlineNode(
         input.content[index],
         [...path, "content", index],
         context,
         depth + 1,
         true,
+        true,
       );
-      if (text !== undefined) {
-        content.push(text);
+      if (inline !== undefined) {
+        content.push(inline);
       }
     }
   }
@@ -1085,15 +1090,16 @@ function parseCodeBlock(
   const content: ContentTextNode[] = [];
   if (Array.isArray(input.content)) {
     for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
-      const text = parseText(
+      const inline = parseInlineNode(
         input.content[index],
         [...path, "content", index],
         context,
         depth + 1,
         false,
+        false,
       );
-      if (text !== undefined) {
-        content.push(text);
+      if (inline?.type === "text") {
+        content.push(inline);
       }
     }
   }
@@ -1364,7 +1370,7 @@ function parseInlineContent(
   path: Path,
   context: ValidationContext,
   depth: number,
-): ContentTextNode[] | undefined {
+): ContentInlineNode[] | undefined {
   if (!Object.hasOwn(input, "content")) {
     return undefined;
   }
@@ -1372,29 +1378,31 @@ function parseInlineContent(
     context.add([...path, "content"], "invalid_content", "Inline content must be an array");
     return undefined;
   }
-  const content: ContentTextNode[] = [];
+  const content: ContentInlineNode[] = [];
   for (let index = 0; index < input.content.length && !context.stopped; index += 1) {
-    const text = parseText(
+    const inline = parseInlineNode(
       input.content[index],
       [...path, "content", index],
       context,
       depth + 1,
       true,
+      true,
     );
-    if (text !== undefined) {
-      content.push(text);
+    if (inline !== undefined) {
+      content.push(inline);
     }
   }
   return content.length === input.content.length ? content : undefined;
 }
 
-function parseText(
+function parseInlineNode(
   input: unknown,
   path: Path,
   context: ValidationContext,
   _depth: number,
   allowMarks: boolean,
-): ContentTextNode | undefined {
+  allowHardBreak: boolean,
+): ContentInlineNode | undefined {
   if (!context.enterNode(input, path, _depth)) {
     return undefined;
   }
@@ -1403,6 +1411,20 @@ function parseText(
     return undefined;
   }
   try {
+    if (input.type === "hardBreak") {
+      if (!hasExactKeys(input, ["type"], path, context)) {
+        return undefined;
+      }
+      if (!allowHardBreak) {
+        context.add(
+          [...path, "type"],
+          "invalid_nesting",
+          "Hard breaks are only allowed in text-capable blocks",
+        );
+        return undefined;
+      }
+      return { type: "hardBreak" };
+    }
     if (!hasKeys(input, ["type", "text"], ["marks"], path, context)) {
       return undefined;
     }
