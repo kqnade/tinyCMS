@@ -95,4 +95,24 @@ describe("editorial application", () => {
     ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
     expect(calls).toBe(0);
   });
+
+  it("maps synchronously thrown repository failures to a generic application error", async () => {
+    const repository = {
+      createPostWithAuthor: () => {
+        throw new Error("database secret");
+      },
+    };
+    const application = createEditorialApplication({
+      repository: repository as never,
+      now: () => 1_700_000_000_000,
+      uuidv7: () => "0192f5a4-7b3c-7d1e-8f20-123456789abe",
+    });
+
+    await expect(
+      application.createPost(
+        { title: "Failure", contentVersion: 1, content: emptyDocument },
+        { subject: "access-subject" },
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_ERROR", message: "Internal server error" });
+  });
 });

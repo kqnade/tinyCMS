@@ -142,12 +142,18 @@ function applicationErrorFromRepository(error: unknown): ApplicationError {
 }
 
 function withRepositoryErrors<T>(operation: () => Promise<T>): Promise<T> {
-  return operation().catch((error: unknown) => {
-    if (error instanceof ApplicationError) {
-      throw error;
-    }
-    throw applicationErrorFromRepository(error);
-  });
+  try {
+    return Promise.resolve(operation()).catch((error: unknown) => {
+      if (error instanceof ApplicationError) {
+        throw error;
+      }
+      throw applicationErrorFromRepository(error);
+    });
+  } catch (error) {
+    return Promise.reject(
+      error instanceof ApplicationError ? error : applicationErrorFromRepository(error),
+    );
+  }
 }
 
 function normalizeContent(
