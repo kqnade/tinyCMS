@@ -9,7 +9,7 @@
     "pnpm": "11.22.0"
   },
   "scripts": {
-    "build": "pnpm --recursive --if-present run build",
+    "build": "pnpm --filter @tinycms/studio build && pnpm --recursive --filter '!@tinycms/studio' --if-present run build",
     "check": "pnpm check:format && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "check:format": "biome format .",
     "dev": "pnpm --parallel --filter './apps/*' --if-present run dev",
