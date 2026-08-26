@@ -151,6 +151,39 @@ describe("StudioEditor", () => {
     expect(editorRef.current?.getContent()).not.toHaveProperty("document");
   });
 
+  it("normalizes ordered-list attrs from the mounted Tiptap JSON", () => {
+    const editorRef = createRef<StudioEditorHandle>();
+    render(
+      <StudioEditor
+        content={createEditorContent({
+          type: "doc",
+          content: [
+            {
+              type: "orderedList",
+              attrs: { start: 1, type: null },
+              content: [{ type: "listItem", content: [{ type: "paragraph" }] }],
+            },
+          ],
+        })}
+        ref={editorRef}
+      />,
+    );
+
+    expect(editorRef.current?.getContent()).toEqual({
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "orderedList",
+            attrs: { start: 1 },
+            content: [{ type: "listItem", content: [{ type: "paragraph" }] }],
+          },
+        ],
+      },
+    });
+  });
+
   it("preserves inline hard breaks from the mounted Tiptap JSON", () => {
     const editorRef = createRef<StudioEditorHandle>();
     render(

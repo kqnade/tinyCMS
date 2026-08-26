@@ -214,11 +214,13 @@ function normalizeNode(input: unknown, path: Path, context: NormalizationContext
     const attrs =
       value.type === "tableCell" || value.type === "tableHeader"
         ? normalizeTableCellAttrs(value.attrs, [...path, "attrs"], context)
-        : value.type === "taskItem" && hasAttrs
-          ? normalizeTaskItemAttrs(value.attrs, [...path, "attrs"], context)
-          : hasAttrs
-            ? normalizeJsonRecord(value.attrs, [...path, "attrs"], context)
-            : undefined;
+        : value.type === "orderedList"
+          ? normalizeOrderedListAttrs(value.attrs, [...path, "attrs"], context)
+          : value.type === "taskItem" && hasAttrs
+            ? normalizeTaskItemAttrs(value.attrs, [...path, "attrs"], context)
+            : hasAttrs
+              ? normalizeJsonRecord(value.attrs, [...path, "attrs"], context)
+              : undefined;
     const content = hasOwn(value, "content")
       ? normalizeChildren(value.content, [...path, "content"], context)
       : undefined;
@@ -230,7 +232,7 @@ function normalizeNode(input: unknown, path: Path, context: NormalizationContext
       : undefined;
 
     if (
-      (hasAttrs && attrs === undefined) ||
+      ((hasAttrs || value.type === "orderedList") && attrs === undefined) ||
       (hasOwn(value, "content") && content === undefined) ||
       (hasOwn(value, "text") && text === undefined) ||
       (hasOwn(value, "marks") && marks === undefined)
@@ -260,6 +262,33 @@ function normalizeTaskItemAttrs(input: unknown, path: Path, context: Normalizati
     return undefined;
   }
   return { checked: attrs.checked };
+}
+
+function normalizeOrderedListAttrs(input: unknown, path: Path, context: NormalizationContext) {
+  const attrs = normalizeJsonRecord(input, path, context);
+  if (attrs === undefined) return undefined;
+  if (!hasOnlyKeys(attrs, ["start", "type"], path, context)) return undefined;
+
+  const start = attrs.start;
+  if (typeof start !== "number" || !Number.isSafeInteger(start) || start < 1) {
+    context.add(
+      [...path, "start"],
+      "invalid_start",
+      "Ordered list start must be a positive safe integer",
+    );
+    return undefined;
+  }
+
+  if (hasOwn(attrs, "type") && attrs.type !== null && attrs.type !== "1") {
+    context.add(
+      [...path, "type"],
+      "invalid_ordered_list_type",
+      "Ordered list type must be decimal",
+    );
+    return undefined;
+  }
+
+  return { start };
 }
 
 function normalizeTableCellAttrs(input: unknown, path: Path, context: NormalizationContext) {

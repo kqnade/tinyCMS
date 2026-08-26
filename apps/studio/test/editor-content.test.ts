@@ -146,4 +146,26 @@ describe("Studio editor content", () => {
       path: ["content", "content", 0, "content", 0, "attrs", "checked"],
     });
   });
+
+  it.each([
+    ["missing start", {}, "invalid_start"],
+    ["zero start", { start: 0 }, "invalid_start"],
+    ["negative start", { start: -1 }, "invalid_start"],
+    ["fractional start", { start: 1.5 }, "invalid_start"],
+    ["unsafe start", { start: Number.MAX_SAFE_INTEGER + 1 }, "invalid_start"],
+    ["unsupported numbering type", { start: 1, type: "a" }, "invalid_ordered_list_type"],
+    ["unknown attr", { start: 1, reversed: false }, "unknown_key"],
+  ] as const)("rejects ordered-list attrs with %s", (_label, attrs, code) => {
+    const result = normalizeEditorContent({
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [{ type: "orderedList", attrs }],
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues[0]?.code).toBe(code);
+  });
 });
