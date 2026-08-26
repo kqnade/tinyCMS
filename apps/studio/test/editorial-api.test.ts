@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEditorialApi, EditorialApiError, isEditorialConflict } from "../src/editorial-api";
 
+type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 const post = {
   content: { content: [], type: "doc" },
   contentVersion: 1 as const,
@@ -27,7 +29,7 @@ function success(data: unknown): Response {
 
 describe("editorial API client", () => {
   it("reads the bounded post list through the relative same-origin route", async () => {
-    const fetcher = vi.fn(async () => success({ items: [post], nextCursor: null }));
+    const fetcher = vi.fn<Fetcher>(async () => success({ items: [post], nextCursor: null }));
     const api = createEditorialApi({ fetcher });
 
     await expect(api.listPosts({ limit: 20 })).resolves.toEqual({
@@ -44,7 +46,7 @@ describe("editorial API client", () => {
   });
 
   it("sends the write boundary headers and exact JSON body for draft saves", async () => {
-    const fetcher = vi.fn(async () => success(post));
+    const fetcher = vi.fn<Fetcher>(async () => success(post));
     const api = createEditorialApi({ fetcher });
     const body = {
       content: post.content,
@@ -64,7 +66,7 @@ describe("editorial API client", () => {
   });
 
   it("classifies only a 409 CONFLICT envelope as an actionable conflict", async () => {
-    const conflictFetcher = vi.fn(
+    const conflictFetcher = vi.fn<Fetcher>(
       async () =>
         new Response(
           JSON.stringify({
@@ -91,7 +93,7 @@ describe("editorial API client", () => {
       );
     });
 
-    const otherFetcher = vi.fn(
+    const otherFetcher = vi.fn<Fetcher>(
       async () =>
         new Response(
           JSON.stringify({

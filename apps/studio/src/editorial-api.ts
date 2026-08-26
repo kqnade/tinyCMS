@@ -44,7 +44,7 @@ export type EditorialApi = {
 export type EditorialApiErrorKind = "conflict" | "error";
 
 export class EditorialApiError extends Error {
-  readonly code?: ErrorCodeValue;
+  readonly code: ErrorCodeValue | undefined;
   readonly kind: EditorialApiErrorKind;
   readonly status: number;
 
