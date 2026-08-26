@@ -1,45 +1,87 @@
 import { describe, expect, it } from "vitest";
-import { createEditorialApplication } from "../src";
+import { createEditorialApplication, type EditorialRepositoryPort } from "../src";
 
 const emptyDocument = { type: "doc", content: [] } as const;
 
-function createRepositoryStub() {
+function createRepositoryStub(
+  createPostWithAuthor: EditorialRepositoryPort["createPostWithAuthor"] = async (input) => ({
+    author: {
+      id: input.author.id,
+      accessSubject: input.author.accessSubject,
+      displayName: input.author.displayName,
+      email: input.author.email ?? null,
+      avatarUrl: input.author.avatarUrl ?? null,
+      createdAt: input.author.createdAt,
+      updatedAt: input.author.updatedAt,
+    },
+    post: {
+      id: input.post.id,
+      slug: input.post.slug,
+      status: "draft",
+      activePublishedRevisionId: null,
+      scheduledAt: null,
+      canonicalUrl: null,
+      noindex: 0,
+      createdBy: input.author.id,
+      createdAt: input.post.createdAt,
+      updatedAt: input.post.updatedAt,
+    },
+    revision: {
+      id: input.revision.id,
+      postId: input.post.id,
+      version: 1,
+      title: input.revision.title,
+      contentVersion: 1,
+      contentJson: input.revision.contentJson,
+      excerpt: null,
+      metadataJson: "{}",
+      authorId: input.author.id,
+      createdAt: input.revision.createdAt,
+    },
+  }),
+): EditorialRepositoryPort {
+  const unavailable = (method: string): never => {
+    throw new Error(`${method} is not configured for this test`);
+  };
+
   return {
-    createPostWithAuthor: async (input: any) => ({
-      author: {
-        id: input.author.id,
-        accessSubject: input.author.accessSubject,
-        displayName: input.author.displayName,
-        email: input.author.email ?? null,
-        avatarUrl: null,
-        createdAt: input.author.createdAt,
-        updatedAt: input.author.updatedAt,
-      },
-      post: {
-        id: input.post.id,
-        slug: input.post.slug,
-        status: "draft",
-        activePublishedRevisionId: null,
-        scheduledAt: null,
-        canonicalUrl: null,
-        noindex: 0,
-        createdBy: input.author.id,
-        createdAt: input.post.createdAt,
-        updatedAt: input.post.updatedAt,
-      },
-      revision: {
-        id: input.revision.id,
-        postId: input.post.id,
-        version: 1,
-        title: input.revision.title,
-        contentVersion: 1,
-        contentJson: input.revision.contentJson,
-        excerpt: null,
-        metadataJson: "{}",
-        authorId: input.author.id,
-        createdAt: input.revision.createdAt,
-      },
-    }),
+    createPostWithAuthor,
+    upsertAuthorByAccessSubject: async (input) => {
+      void input;
+      return unavailable("upsertAuthorByAccessSubject");
+    },
+    saveDraft: async (input) => {
+      void input;
+      return unavailable("saveDraft");
+    },
+    checkpointDraft: async (input) => {
+      void input;
+      return unavailable("checkpointDraft");
+    },
+    restoreDraft: async (input) => {
+      void input;
+      return unavailable("restoreDraft");
+    },
+    getPost: async (input) => {
+      void input;
+      return unavailable("getPost");
+    },
+    getDraft: async (input) => {
+      void input;
+      return unavailable("getDraft");
+    },
+    getPostAggregate: async (input) => {
+      void input;
+      return unavailable("getPostAggregate");
+    },
+    listPosts: async (input) => {
+      void input;
+      return unavailable("listPosts");
+    },
+    listRevisions: async (input) => {
+      void input;
+      return unavailable("listRevisions");
+    },
   };
 }
 
@@ -47,7 +89,7 @@ describe("editorial application", () => {
   it("creates a normalized post and uses a stable fallback for non-ASCII titles", async () => {
     const repository = createRepositoryStub();
     const application = createEditorialApplication({
-      repository: repository as never,
+      repository,
       now: () => 1_700_000_000_000,
       uuidv7: () => "0192f5a4-7b3c-7d1e-8f20-123456789abc",
     });
@@ -82,7 +124,7 @@ describe("editorial application", () => {
       return original(...args);
     };
     const application = createEditorialApplication({
-      repository: repository as never,
+      repository,
       now: () => 1_700_000_000_000,
       uuidv7: () => "0192f5a4-7b3c-7d1e-8f20-123456789abd",
     });
@@ -103,7 +145,7 @@ describe("editorial application", () => {
       },
     };
     const application = createEditorialApplication({
-      repository: repository as never,
+      repository: createRepositoryStub(repository.createPostWithAuthor),
       now: () => 1_700_000_000_000,
       uuidv7: () => "0192f5a4-7b3c-7d1e-8f20-123456789abe",
     });

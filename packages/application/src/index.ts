@@ -18,12 +18,16 @@ import {
   type Author,
   type CreateAuthorInput,
   type CreatePostWithAuthorInput,
-  type EditorialRepository,
+  type CreatedAuthorPostRevision,
+  type CheckpointDraftInput,
+  type PostAggregate,
   RepositoryError,
   RepositoryErrorCode,
   type Post,
   type PostDraft,
   type PostRevision,
+  type RestoreDraftInput,
+  type SaveDraftInput,
 } from "@tinycms/database";
 import { type ContentDocument, validateContentDocument } from "@tinycms/content";
 
@@ -58,8 +62,25 @@ export type AccessIdentity = {
   readonly avatarUrl?: string;
 };
 
+export interface EditorialRepositoryPort {
+  createPostWithAuthor(input: CreatePostWithAuthorInput): Promise<CreatedAuthorPostRevision>;
+  upsertAuthorByAccessSubject(input: CreateAuthorInput): Promise<Author>;
+  saveDraft(input: SaveDraftInput): Promise<PostDraft>;
+  checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
+  restoreDraft(input: RestoreDraftInput): Promise<{ draft: PostDraft; revision: PostRevision }>;
+  getPost(id: string): Promise<Post>;
+  getDraft(postId: string): Promise<PostDraft>;
+  getPostAggregate(id: string): Promise<PostAggregate>;
+  listPosts(input: { limit: number; afterUpdatedAt?: number; afterId?: string }): Promise<Post[]>;
+  listRevisions(input: {
+    postId: string;
+    limit: number;
+    afterVersion?: number;
+  }): Promise<PostRevision[]>;
+}
+
 export type EditorialApplicationDependencies = {
-  readonly repository: EditorialRepository;
+  readonly repository: EditorialRepositoryPort;
   readonly now?: () => number;
   readonly uuidv7?: () => string;
 };
