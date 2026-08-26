@@ -741,6 +741,9 @@ describe("admin worker", () => {
       "0192f5a4-7b3c-7d1e-8f20-123456789ad5",
       "0192f5a4-7b3c-7d1e-8f20-123456789ad6",
       "0192f5a4-7b3c-7d1e-8f20-123456789ad7",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad8",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad9",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ada",
     ];
     const application = createAdminApp({
       now: () => NOW,
@@ -961,6 +964,27 @@ describe("admin worker", () => {
       displayName: "author@example.test",
       email: "author@example.test",
     });
+
+    const fallbackFirstResponse = await request("/api/v1/admin/posts", {
+      method: "POST",
+      body: JSON.stringify({ title: "日本語の投稿" }),
+    });
+    expect(fallbackFirstResponse.status).toBe(200);
+    const fallbackFirstBody = (await fallbackFirstResponse.json()) as {
+      data: { id: string; slug: string };
+    };
+    expect(fallbackFirstBody.data.slug).toBe(`post-${fallbackFirstBody.data.id}`);
+
+    const fallbackSecondResponse = await request("/api/v1/admin/posts", {
+      method: "POST",
+      body: JSON.stringify({ title: "別の日本語" }),
+    });
+    expect(fallbackSecondResponse.status).toBe(200);
+    const fallbackSecondBody = (await fallbackSecondResponse.json()) as {
+      data: { id: string; slug: string };
+    };
+    expect(fallbackSecondBody.data.slug).toBe(`post-${fallbackSecondBody.data.id}`);
+    expect(fallbackSecondBody.data.slug).not.toBe(fallbackFirstBody.data.slug);
   });
 
   it("rejects each invalid browser write boundary before D1", async () => {

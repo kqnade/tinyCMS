@@ -105,7 +105,7 @@ describe("editorial application", () => {
 
     expect(result).toMatchObject({
       id: "0192f5a4-7b3c-7d1e-8f20-123456789abc",
-      slug: "post-0192f5a4-7b3c",
+      slug: "post-0192f5a4-7b3c-7d1e-8f20-123456789abc",
       title: "日本語の記事",
       contentVersion: 1,
       content: emptyDocument,

@@ -248,7 +248,7 @@ function authorInput(identity: AccessIdentity, id: string, timestamp: number): C
 }
 
 function slugFromTitle(title: string, postId: string): string {
-  const fallback = `post-${postId.slice(0, 8)}-${postId.slice(9, 13)}`;
+  const fallback = `post-${postId}`;
   const containsNonAscii = [...title].some((character) => {
     const codePoint = character.codePointAt(0);
     return codePoint !== undefined && codePoint > 0x7f;
