@@ -1,4 +1,4 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import type { HonoJsonWebKey } from "hono/utils/jwt/jws";
 import { sign } from "hono/utils/jwt/jwt";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,11 @@ const ACCESS_BINDINGS = {
   ADMIN_HOST: "localhost",
   ACCESS_TEAM_DOMAIN: ACCESS_DOMAIN,
   ACCESS_AUD: ACCESS_AUDIENCE,
+};
+
+const DB_BINDINGS = {
+  ...ACCESS_BINDINGS,
+  CMS_DB: env.CMS_DB,
 };
 
 async function createSigningKey(kid: string) {
@@ -39,7 +44,8 @@ async function createSigningKey(kid: string) {
 
   return {
     publicKey,
-    sign: (payload: Parameters<typeof sign>[0]) => sign(payload, privateKey, "RS256"),
+    sign: (payload: Parameters<typeof sign>[0]) =>
+      sign({ sub: "test-access-subject", ...payload }, privateKey, "RS256"),
   };
 }
 
@@ -707,5 +713,423 @@ describe("admin worker", () => {
     });
 
     expect(response.status).toBe(404);
+  });
+
+  it("round trips editorial mutations through Access, the Worker, and local D1", async () => {
+    const key = await createSigningKey("editorial-round-trip-key");
+    const ids = [
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac1",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac2",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac3",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac4",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac5",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac6",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac7",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac8",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ac9",
+      "0192f5a4-7b3c-7d1e-8f20-123456789aca",
+      "0192f5a4-7b3c-7d1e-8f20-123456789acb",
+      "0192f5a4-7b3c-7d1e-8f20-123456789acc",
+      "0192f5a4-7b3c-7d1e-8f20-123456789acd",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ace",
+      "0192f5a4-7b3c-7d1e-8f20-123456789acf",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad0",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad1",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad2",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad3",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad4",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad5",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad6",
+      "0192f5a4-7b3c-7d1e-8f20-123456789ad7",
+    ];
+    const application = createAdminApp({
+      now: () => NOW,
+      uuidv7: () => {
+        const id = ids.shift();
+        if (id === undefined) throw new Error("test UUID sequence exhausted");
+        return id;
+      },
+      fetch: async () => new Response(JSON.stringify({ keys: [key.publicKey] }), { status: 200 }),
+    });
+    const assertion = await key.sign({
+      iss: ACCESS_ISSUER,
+      aud: ACCESS_AUDIENCE,
+      exp: NOW / 1000 + 300,
+      sub: "editorial-author-subject",
+      email: "author@example.test",
+    });
+    const request = (path: string, init: RequestInit = {}) =>
+      application.request(
+        `https://localhost${path}`,
+        {
+          ...init,
+          headers: {
+            "Cf-Access-Jwt-Assertion": assertion,
+            ...(init.body === undefined
+              ? {}
+              : {
+                  "Content-Type": "application/json",
+                  Origin: "https://localhost",
+                  ["X-TinyCMS-Request"]: "1",
+                }),
+            ...init.headers,
+          },
+        },
+        DB_BINDINGS,
+      );
+
+    const document = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Initial" }] }],
+    };
+    const createdResponse = await request("/api/v1/admin/posts", {
+      method: "POST",
+      body: JSON.stringify({ title: "Round trip", contentVersion: 1, content: document }),
+    });
+    expect(createdResponse.status).toBe(200);
+    const createdBody = (await createdResponse.json()) as {
+      data: { id: string; slug: string; draftVersion: number; currentRevisionVersion: number };
+    };
+    expect(createdBody.data).toMatchObject({
+      slug: "round-trip",
+      draftVersion: 1,
+      currentRevisionVersion: 1,
+    });
+    const postId = createdBody.data.id;
+
+    await expect(request(`/api/v1/admin/posts/${postId}`)).resolves.toMatchObject({ status: 200 });
+
+    const savedResponse = await request(`/api/v1/admin/posts/${postId}/draft`, {
+      method: "PUT",
+      body: JSON.stringify({
+        expectedDraftVersion: 1,
+        title: "Saved title",
+        contentVersion: 1,
+        content: document,
+      }),
+    });
+    expect(savedResponse.status).toBe(200);
+    const savedBody = (await savedResponse.json()) as { data: { draftVersion: number } };
+    expect(savedBody.data.draftVersion).toBe(2);
+
+    const staleSave = await request(`/api/v1/admin/posts/${postId}/draft`, {
+      method: "PUT",
+      body: JSON.stringify({
+        expectedDraftVersion: 1,
+        title: "Stale title",
+        contentVersion: 1,
+        content: document,
+      }),
+    });
+    expect(staleSave.status).toBe(409);
+    expect(await staleSave.json()).toMatchObject({ error: { code: "CONFLICT" } });
+
+    const checkpointResponse = await request(`/api/v1/admin/posts/${postId}/revisions`, {
+      method: "POST",
+      body: JSON.stringify({ expectedDraftVersion: 2, expectedRevisionVersion: 1 }),
+    });
+    expect(checkpointResponse.status).toBe(200);
+    const checkpointBody = (await checkpointResponse.json()) as {
+      data: { revision: { revisionVersion: number; title: string } };
+    };
+    expect(checkpointBody.data.revision).toMatchObject({
+      revisionVersion: 2,
+      title: "Saved title",
+    });
+
+    const staleCheckpoint = await request(`/api/v1/admin/posts/${postId}/revisions`, {
+      method: "POST",
+      body: JSON.stringify({ expectedDraftVersion: 2, expectedRevisionVersion: 1 }),
+    });
+    expect(staleCheckpoint.status).toBe(409);
+    expect(await staleCheckpoint.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    const revisionCountAfterStaleCheckpoint = await env.CMS_DB.prepare(
+      "SELECT COUNT(*) AS count FROM post_revisions WHERE post_id = ?",
+    )
+      .bind(postId)
+      .first<{ count: number }>();
+    expect(revisionCountAfterStaleCheckpoint?.count).toBe(2);
+
+    const firstRevisionPage = await request(`/api/v1/admin/posts/${postId}/revisions?limit=1`);
+    expect(firstRevisionPage.status).toBe(200);
+    const firstRevisionBody = (await firstRevisionPage.json()) as {
+      data: { items: Array<{ revisionVersion: number }>; nextCursor: string | null };
+    };
+    expect(firstRevisionBody.data.items).toHaveLength(1);
+    expect(firstRevisionBody.data.items[0]).toMatchObject({ revisionVersion: 2 });
+    expect(firstRevisionBody.data.nextCursor).toEqual(expect.any(String));
+    expect(firstRevisionBody.data.nextCursor).not.toContain("revisionVersion");
+    const secondRevisionPage = await request(
+      `/api/v1/admin/posts/${postId}/revisions?limit=1&cursor=${encodeURIComponent(firstRevisionBody.data.nextCursor as string)}`,
+    );
+    expect(secondRevisionPage.status).toBe(200);
+    const secondRevisionBody = (await secondRevisionPage.json()) as {
+      data: { items: Array<{ revisionVersion: number }> };
+    };
+    expect(secondRevisionBody.data.items).toHaveLength(1);
+    expect(secondRevisionBody.data.items[0]).toMatchObject({ revisionVersion: 1 });
+
+    const restoredResponse = await request(
+      `/api/v1/admin/posts/${postId}/revisions/${(await env.CMS_DB.prepare("SELECT id FROM post_revisions WHERE post_id = ? AND version = 1").bind(postId).first<{ id: string }>())?.id}/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedDraftVersion: 2, expectedRevisionVersion: 2 }),
+      },
+    );
+    expect(restoredResponse.status).toBe(200);
+    const restoredBody = (await restoredResponse.json()) as {
+      data: { post: { draftVersion: number } };
+    };
+    expect(restoredBody.data.post.draftVersion).toBe(3);
+
+    const countRows = async () =>
+      Promise.all(
+        ["authors", "posts", "post_revisions", "post_drafts"].map(async (table) => {
+          const row = await env.CMS_DB.prepare(`SELECT COUNT(*) AS count FROM ${table}`).first<{
+            count: number;
+          }>();
+          return row?.count ?? 0;
+        }),
+      );
+    const rowsBeforeDuplicate = await countRows();
+    const duplicateSlugResponse = await request("/api/v1/admin/posts", {
+      method: "POST",
+      body: JSON.stringify({ title: "Round trip", contentVersion: 1, content: document }),
+    });
+    expect(duplicateSlugResponse.status).toBe(409);
+    expect(await duplicateSlugResponse.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(await countRows()).toEqual(rowsBeforeDuplicate);
+
+    const secondPostResponse = await request("/api/v1/admin/posts", {
+      method: "POST",
+      body: JSON.stringify({ title: "Second post", contentVersion: 1, content: document }),
+    });
+    expect(secondPostResponse.status).toBe(200);
+    const secondPostBody = (await secondPostResponse.json()) as { data: { id: string } };
+    const firstRevision = await env.CMS_DB.prepare(
+      "SELECT id FROM post_revisions WHERE post_id = ? AND version = 1",
+    )
+      .bind(postId)
+      .first<{ id: string }>();
+    const crossPostRestore = await request(
+      `/api/v1/admin/posts/${secondPostBody.data.id}/revisions/${firstRevision?.id}/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedDraftVersion: 1, expectedRevisionVersion: 1 }),
+      },
+    );
+    expect(crossPostRestore.status).toBe(404);
+    expect(await crossPostRestore.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+
+    const firstPostPage = await request("/api/v1/admin/posts?limit=1");
+    expect(firstPostPage.status).toBe(200);
+    const firstPostPageBody = (await firstPostPage.json()) as {
+      data: { items: Array<{ slug: string }>; nextCursor: string | null };
+    };
+    expect(firstPostPageBody.data.items).toHaveLength(1);
+    expect(firstPostPageBody.data.items[0]?.slug).toBe("second-post");
+    expect(firstPostPageBody.data.nextCursor).toEqual(expect.any(String));
+    expect(firstPostPageBody.data.nextCursor).not.toContain("updatedAt");
+    const secondPostPage = await request(
+      `/api/v1/admin/posts?limit=1&cursor=${encodeURIComponent(firstPostPageBody.data.nextCursor as string)}`,
+    );
+    expect(secondPostPage.status).toBe(200);
+    const secondPostPageBody = (await secondPostPage.json()) as {
+      data: { items: Array<{ slug: string }>; nextCursor: string | null };
+    };
+    expect(secondPostPageBody.data.items).toHaveLength(1);
+    expect(secondPostPageBody.data.items[0]?.slug).toBe("round-trip");
+    expect(secondPostPageBody.data.nextCursor).toBeNull();
+
+    const authorCount = await env.CMS_DB.prepare(
+      "SELECT COUNT(*) AS count FROM authors WHERE access_subject = ?",
+    )
+      .bind("editorial-author-subject")
+      .first<{ count: number }>();
+    expect(authorCount?.count).toBe(1);
+    const author = await env.CMS_DB.prepare(
+      "SELECT display_name AS displayName, email FROM authors WHERE access_subject = ?",
+    )
+      .bind("editorial-author-subject")
+      .first<{ displayName: string; email: string | null }>();
+    expect(author).toMatchObject({
+      displayName: "author@example.test",
+      email: "author@example.test",
+    });
+  });
+
+  it("rejects each invalid browser write boundary before D1", async () => {
+    const key = await createSigningKey("boundary-key");
+    const application = createAdminApp({
+      now: () => NOW,
+      fetch: async () => new Response(JSON.stringify({ keys: [key.publicKey] }), { status: 200 }),
+    });
+    const assertion = await key.sign({
+      iss: ACCESS_ISSUER,
+      aud: ACCESS_AUDIENCE,
+      exp: NOW / 1000 + 300,
+      sub: "boundary-subject",
+    });
+    const validBoundary = {
+      "Content-Type": "application/json",
+      Origin: "https://localhost",
+      "X-TinyCMS-Request": "1",
+    };
+    const cases = [
+      {
+        name: "non-JSON content type",
+        headers: { ...validBoundary, "Content-Type": "text/plain" },
+      },
+      {
+        name: "missing marker",
+        headers: { "Content-Type": validBoundary["Content-Type"], Origin: validBoundary.Origin },
+      },
+      {
+        name: "wrong marker",
+        headers: { ...validBoundary, "X-TinyCMS-Request": "0" },
+      },
+      {
+        name: "missing origin",
+        headers: { "Content-Type": validBoundary["Content-Type"], "X-TinyCMS-Request": "1" },
+      },
+      {
+        name: "wrong origin",
+        headers: { ...validBoundary, Origin: "https://evil.example.test" },
+      },
+    ] as const;
+    for (const testCase of cases) {
+      const before = await env.CMS_DB.prepare("SELECT COUNT(*) AS count FROM posts").first<{
+        count: number;
+      }>();
+      const response = await application.request(
+        "https://localhost/api/v1/admin/posts",
+        {
+          method: "POST",
+          headers: { "Cf-Access-Jwt-Assertion": assertion, ...testCase.headers },
+          body: JSON.stringify({ title: `Rejected ${testCase.name}` }),
+        },
+        DB_BINDINGS,
+      );
+      expect(response.status, testCase.name).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+      const after = await env.CMS_DB.prepare("SELECT COUNT(*) AS count FROM posts").first<{
+        count: number;
+      }>();
+      expect(after?.count, testCase.name).toBe(before?.count);
+    }
+
+    const malformedJson = await application.request(
+      "https://localhost/api/v1/admin/posts",
+      {
+        method: "POST",
+        headers: { "Cf-Access-Jwt-Assertion": assertion, ...validBoundary },
+        body: "not-json",
+      },
+      DB_BINDINGS,
+    );
+    expect(malformedJson.status).toBe(400);
+
+    const oversizedBody = await application.request(
+      "https://localhost/api/v1/admin/posts",
+      {
+        method: "POST",
+        headers: {
+          "Cf-Access-Jwt-Assertion": assertion,
+          ...validBoundary,
+          "Content-Length": "1048577",
+        },
+        body: "{}",
+      },
+      DB_BINDINGS,
+    );
+    expect(oversizedBody.status).toBe(400);
+
+    const invalidContent = await application.request(
+      "https://localhost/api/v1/admin/posts",
+      {
+        method: "POST",
+        headers: { "Cf-Access-Jwt-Assertion": assertion, ...validBoundary },
+        body: JSON.stringify({ contentVersion: 1, content: { type: "script" } }),
+      },
+      DB_BINDINGS,
+    );
+    expect(invalidContent.status).toBe(400);
+
+    const invalidCursor = await application.request(
+      "https://localhost/api/v1/admin/posts?cursor=not-an-opaque-cursor",
+      { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+      DB_BINDINGS,
+    );
+    expect(invalidCursor.status).toBe(400);
+    expect(await invalidCursor.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+
+    const malformedParams = await application.request(
+      "https://localhost/api/v1/admin/posts/not-a-uuid",
+      { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+      DB_BINDINGS,
+    );
+    expect(malformedParams.status).toBe(400);
+    expect(await malformedParams.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+
+    const overLimit = await application.request(
+      "https://localhost/api/v1/admin/posts?limit=101",
+      { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+      DB_BINDINGS,
+    );
+    expect(overLimit.status).toBe(400);
+
+    const missingPost = await application.request(
+      "https://localhost/api/v1/admin/posts/0192f5a4-7b3c-7d1e-8f20-ffffffffffff",
+      { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+      DB_BINDINGS,
+    );
+    expect(missingPost.status).toBe(404);
+    expect(await missingPost.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+
+    const corruptionCreate = await application.request(
+      "https://localhost/api/v1/admin/posts",
+      {
+        method: "POST",
+        headers: { "Cf-Access-Jwt-Assertion": assertion, ...validBoundary },
+        body: JSON.stringify({ title: "Corrupted stored content" }),
+      },
+      DB_BINDINGS,
+    );
+    expect(corruptionCreate.status).toBe(200);
+    const corruptionBody = (await corruptionCreate.json()) as { data: { id: string } };
+    await env.CMS_DB.prepare("UPDATE post_drafts SET content_json = ? WHERE post_id = ?")
+      .bind('{"type":"script"}', corruptionBody.data.id)
+      .run();
+    const corruptedRead = await application.request(
+      `https://localhost/api/v1/admin/posts/${corruptionBody.data.id}`,
+      { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+      DB_BINDINGS,
+    );
+    expect(corruptedRead.status).toBe(500);
+    const corruptedResponseBody = await corruptedRead.json();
+    expect(corruptedResponseBody).toMatchObject({
+      error: { code: "INTERNAL_ERROR", message: "Internal server error" },
+    });
+    expect(JSON.stringify(corruptedResponseBody)).not.toContain("Stored content");
+  });
+
+  it("requires a nonempty Access subject", async () => {
+    const key = await createSigningKey("missing-subject-key");
+    const assertion = await key.sign({
+      iss: ACCESS_ISSUER,
+      aud: ACCESS_AUDIENCE,
+      exp: NOW / 1000 + 300,
+      sub: "",
+    });
+    const application = createAdminApp({
+      now: () => NOW,
+      fetch: async () => new Response(JSON.stringify({ keys: [key.publicKey] }), { status: 200 }),
+    });
+    const response = await application.request(
+      "https://localhost/healthz",
+      { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+      ACCESS_BINDINGS,
+    );
+    await expectAuthInvalid(response);
   });
 });

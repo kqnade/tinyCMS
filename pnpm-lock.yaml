@@ -29,9 +29,15 @@ importers:
 
   apps/admin-worker:
     dependencies:
+      '@tinycms/application':
+        specifier: workspace:*
+        version: link:../../packages/application
       '@tinycms/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@tinycms/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       hono:
         specifier: 4.13.2
         version: 4.13.2

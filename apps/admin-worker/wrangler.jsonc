@@ -9,5 +9,13 @@
     "ADMIN_HOST": "localhost",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": ""
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "CMS_DB",
+      "database_name": "tinycms-admin-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../migrations/d1"
+    }
+  ]
 }

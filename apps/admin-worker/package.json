@@ -10,7 +10,9 @@
     "typecheck": "wrangler types --include-runtime false --check && tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@tinycms/application": "workspace:*",
     "@tinycms/contracts": "workspace:*",
+    "@tinycms/database": "workspace:*",
     "hono": "4.13.2"
   }
 }
