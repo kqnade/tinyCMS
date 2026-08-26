@@ -303,4 +303,217 @@ describe("editorial D1 constraints", () => {
         .run(),
     ).rejects.toThrow();
   });
+
+  it("rejects post draft versions below one", async () => {
+    const draftAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d101";
+    const draftPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d102";
+
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftAuthorId, "subject-draft-version", "Ada", 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, "draft-version", draftAuthorId, 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+
+    await expect(
+      env.TEST_DB.prepare(
+        "INSERT INTO post_drafts (post_id, version, title, content_version, content_json, author_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(draftPostId, 0, "Draft", 1, '{"type":"doc"}', draftAuthorId, 1_700_000_000_000)
+        .run(),
+    ).rejects.toThrow();
+  });
+
+  it("rejects post draft content versions below one", async () => {
+    const draftAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d201";
+    const draftPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d202";
+
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        draftAuthorId,
+        "subject-draft-content-version",
+        "Ada",
+        1_700_000_000_000,
+        1_700_000_000_000,
+      )
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        draftPostId,
+        "draft-content-version",
+        draftAuthorId,
+        1_700_000_000_000,
+        1_700_000_000_000,
+      )
+      .run();
+
+    await expect(
+      env.TEST_DB.prepare(
+        "INSERT INTO post_drafts (post_id, version, title, content_version, content_json, author_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(draftPostId, 1, "Draft", 0, '{"type":"doc"}', draftAuthorId, 1_700_000_000_000)
+        .run(),
+    ).rejects.toThrow();
+  });
+
+  it("rejects invalid post draft content JSON", async () => {
+    const draftAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d301";
+    const draftPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d302";
+
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        draftAuthorId,
+        "subject-draft-content-json",
+        "Ada",
+        1_700_000_000_000,
+        1_700_000_000_000,
+      )
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, "draft-content-json", draftAuthorId, 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+
+    await expect(
+      env.TEST_DB.prepare(
+        "INSERT INTO post_drafts (post_id, version, title, content_version, content_json, author_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(draftPostId, 1, "Draft", 1, "not-json", draftAuthorId, 1_700_000_000_000)
+        .run(),
+    ).rejects.toThrow();
+  });
+
+  it("defaults draft metadata to valid JSON and rejects invalid metadata", async () => {
+    const draftAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d401";
+    const draftPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d402";
+
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftAuthorId, "subject-draft-metadata", "Ada", 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, "draft-metadata", draftAuthorId, 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO post_drafts (post_id, version, title, content_version, content_json, author_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, 1, "Draft", 1, '{"type":"doc"}', draftAuthorId, 1_700_000_000_000)
+      .run();
+
+    const draft = await env.TEST_DB.prepare(
+      "SELECT metadata_json FROM post_drafts WHERE post_id = ?",
+    )
+      .bind(draftPostId)
+      .first<{ metadata_json: string }>();
+    expect(draft?.metadata_json).toBe("{}");
+
+    await expect(
+      env.TEST_DB.prepare("UPDATE post_drafts SET metadata_json = ? WHERE post_id = ?")
+        .bind("not-json", draftPostId)
+        .run(),
+    ).rejects.toThrow();
+  });
+
+  it("rejects negative post draft timestamps", async () => {
+    const draftAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d501";
+    const draftPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d502";
+
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftAuthorId, "subject-draft-timestamp", "Ada", 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, "draft-timestamp", draftAuthorId, 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+
+    await expect(
+      env.TEST_DB.prepare(
+        "INSERT INTO post_drafts (post_id, version, title, content_version, content_json, author_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(draftPostId, 1, "Draft", 1, '{"type":"doc"}', draftAuthorId, -1)
+        .run(),
+    ).rejects.toThrow();
+  });
+
+  it("cascades post draft deletion when its post is deleted", async () => {
+    const draftAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d601";
+    const draftPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d602";
+
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftAuthorId, "subject-draft-cascade", "Ada", 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, "draft-cascade", draftAuthorId, 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO post_drafts (post_id, version, title, content_version, content_json, author_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, 1, "Draft", 1, '{"type":"doc"}', draftAuthorId, 1_700_000_000_000)
+      .run();
+
+    await env.TEST_DB.prepare("DELETE FROM posts WHERE id = ?").bind(draftPostId).run();
+
+    const draft = await env.TEST_DB.prepare("SELECT post_id FROM post_drafts WHERE post_id = ?")
+      .bind(draftPostId)
+      .first();
+    expect(draft).toBeNull();
+  });
+
+  it("restricts deleting an author referenced by a post draft", async () => {
+    const postAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d701";
+    const draftAuthorId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d702";
+    const draftPostId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3d703";
+
+    await env.TEST_DB.prepare(
+      "INSERT INTO authors (id, access_subject, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        postAuthorId,
+        "subject-draft-post-author",
+        "Ada",
+        1_700_000_000_000,
+        1_700_000_000_000,
+        draftAuthorId,
+        "subject-draft-author",
+        "Grace",
+        1_700_000_000_000,
+        1_700_000_000_000,
+      )
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO posts (id, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, "draft-author", postAuthorId, 1_700_000_000_000, 1_700_000_000_000)
+      .run();
+    await env.TEST_DB.prepare(
+      "INSERT INTO post_drafts (post_id, version, title, content_version, content_json, author_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(draftPostId, 1, "Draft", 1, '{"type":"doc"}', draftAuthorId, 1_700_000_000_000)
+      .run();
+
+    await expect(
+      env.TEST_DB.prepare("DELETE FROM authors WHERE id = ?").bind(draftAuthorId).run(),
+    ).rejects.toThrow();
+  });
 });

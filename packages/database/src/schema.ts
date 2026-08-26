@@ -153,6 +153,38 @@ export const postRevisions = sqliteTable(
   ],
 );
 
+export const postDrafts = sqliteTable(
+  "post_drafts",
+  {
+    postId: text("post_id")
+      .primaryKey()
+      .references(() => posts.id, { onUpdate: "restrict", onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    contentVersion: integer("content_version").notNull(),
+    contentJson: text("content_json").notNull(),
+    excerpt: text("excerpt"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => authors.id, { onUpdate: "restrict", onDelete: "restrict" }),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "post_drafts_version_check",
+      sql`typeof(${table.version}) = 'integer' AND ${table.version} >= 1`,
+    ),
+    check(
+      "post_drafts_content_version_check",
+      sql`typeof(${table.contentVersion}) = 'integer' AND ${table.contentVersion} >= 1`,
+    ),
+    check("post_drafts_content_json_check", jsonTextCheck(table.contentJson)),
+    check("post_drafts_metadata_json_check", jsonTextCheck(table.metadataJson)),
+    check("post_drafts_updated_at_epoch_ms_check", epochMillisecondsCheck(table.updatedAt)),
+  ],
+);
+
 export const tags = sqliteTable(
   "tags",
   {
@@ -388,6 +420,7 @@ export const schema = {
   authors,
   posts,
   postRevisions,
+  postDrafts,
   tags,
   postTags,
   media,

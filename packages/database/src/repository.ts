@@ -1,12 +1,13 @@
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { authors, postRevisions, posts, schema, type searchChunks } from "./schema";
+import { authors, postDrafts, postRevisions, posts, schema, type searchChunks } from "./schema";
 
 export const MAX_SEARCH_QUERY_LENGTH = 256;
 
 export type Author = typeof authors.$inferSelect;
 export type Post = typeof posts.$inferSelect;
 export type PostRevision = typeof postRevisions.$inferSelect;
+export type PostDraft = typeof postDrafts.$inferSelect;
 export type SearchChunk = typeof searchChunks.$inferSelect;
 
 export const RepositoryErrorCode = {
@@ -60,6 +61,27 @@ export interface CreateRevisionInput {
   createdAt: number;
 }
 
+export interface SaveDraftInput {
+  postId: string;
+  expectedDraftVersion: number;
+  authorId: string;
+  title: string;
+  contentVersion: number;
+  contentJson: string;
+  excerpt?: string | null;
+  metadataJson?: string;
+  updatedAt: number;
+}
+
+export interface CheckpointDraftInput {
+  postId: string;
+  expectedDraftVersion: number;
+  expectedRevisionVersion: number;
+  revisionId: string;
+  authorId: string;
+  createdAt: number;
+}
+
 export interface AppendRevisionInput {
   postId: string;
   authorId: string;
@@ -76,6 +98,17 @@ export interface RestoreRevisionInput {
   createdAt: number;
 }
 
+export interface RestoreDraftInput {
+  postId: string;
+  sourceRevisionId: string;
+  expectedDraftVersion: number;
+  expectedRevisionVersion: number;
+  revisionId: string;
+  authorId: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface CreateAuthorPostRevisionInput {
   author: CreateAuthorInput;
   post: CreatePostInput;
@@ -85,6 +118,11 @@ export interface CreateAuthorPostRevisionInput {
 export interface CreatedAuthorPostRevision {
   author: Author;
   post: Post;
+  revision: PostRevision;
+}
+
+export interface RestoredDraft {
+  draft: PostDraft;
   revision: PostRevision;
 }
 
@@ -99,10 +137,14 @@ export interface EditorialRepository {
   ): Promise<CreatedAuthorPostRevision>;
   appendRevision(input: AppendRevisionInput): Promise<PostRevision>;
   restoreRevision(input: RestoreRevisionInput): Promise<PostRevision>;
+  restoreDraft(input: RestoreDraftInput): Promise<RestoredDraft>;
+  saveDraft(input: SaveDraftInput): Promise<PostDraft>;
+  checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
   getAuthor(id: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
   getPostBySlug(slug: string): Promise<Post>;
   getRevision(id: string): Promise<PostRevision>;
+  getDraft(postId: string): Promise<PostDraft>;
   getPostAggregate(id: string): Promise<PostAggregate>;
   purgePost(id: string): Promise<void>;
   searchChunks(query: string): Promise<SearchChunk[]>;
@@ -141,6 +183,191 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       db.select().from(postRevisions).where(eq(postRevisions.id, id)).limit(1),
       "post revision",
     );
+
+  const getDraft = (postId: string): Promise<PostDraft> =>
+    readOne(
+      db.select().from(postDrafts).where(eq(postDrafts.postId, postId)).limit(1),
+      "post draft",
+    );
+
+  const saveDraft = async ({
+    postId,
+    expectedDraftVersion,
+    authorId,
+    title,
+    contentVersion,
+    contentJson,
+    excerpt,
+    metadataJson,
+    updatedAt,
+  }: SaveDraftInput): Promise<PostDraft> => {
+    try {
+      const [postResult, draftResult] = await database.batch([
+        database
+          .prepare(
+            `UPDATE posts
+             SET updated_at = ?
+             WHERE id = ?
+               AND EXISTS (
+                 SELECT 1
+                 FROM post_drafts
+                 WHERE post_drafts.post_id = posts.id
+                   AND post_drafts.version = ?
+               )`,
+          )
+          .bind(updatedAt, postId, expectedDraftVersion),
+        database
+          .prepare(
+            `UPDATE post_drafts
+             SET title = ?, content_version = ?, content_json = ?, excerpt = ?,
+               metadata_json = ?, author_id = ?, updated_at = ?, version = version + 1
+             WHERE post_id = ? AND version = ?
+             RETURNING post_id AS "postId", version, title,
+               content_version AS "contentVersion", content_json AS "contentJson",
+               excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+               updated_at AS "updatedAt"`,
+          )
+          .bind(
+            title,
+            contentVersion,
+            contentJson,
+            excerpt ?? null,
+            metadataJson ?? "{}",
+            authorId,
+            updatedAt,
+            postId,
+            expectedDraftVersion,
+          ),
+      ]);
+      const savedDraft = draftResult?.results[0] as PostDraft | undefined;
+      const postUpdated = postResult?.meta.changes === 1;
+      const draftUpdated = draftResult?.meta.changes === 1;
+      if (postUpdated && draftUpdated && savedDraft !== undefined) {
+        return savedDraft;
+      }
+      if (postUpdated || draftUpdated || savedDraft !== undefined) {
+        throw new Error("Draft save statements returned a partial result");
+      }
+
+      const draft = await database
+        .prepare('SELECT post_id AS "postId" FROM post_drafts WHERE post_id = ?')
+        .bind(postId)
+        .first<{ postId: string }>();
+      if (draft === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post draft was not found");
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.CONFLICT,
+        "Draft save conflicted with a newer version",
+      );
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to save post draft",
+        cause,
+      );
+    }
+  };
+
+  const checkpointDraft = async ({
+    postId,
+    expectedDraftVersion,
+    expectedRevisionVersion,
+    revisionId,
+    authorId,
+    createdAt,
+  }: CheckpointDraftInput): Promise<PostRevision> => {
+    try {
+      const [postResult, revisionResult] = await database.batch([
+        database
+          .prepare(
+            `UPDATE posts
+             SET updated_at = ?
+             WHERE id = ?
+               AND EXISTS (
+                 SELECT 1
+                 FROM post_drafts AS draft
+                 JOIN (
+                   SELECT post_id, MAX(version) AS version
+                   FROM post_revisions
+                   WHERE post_id = ?
+                   GROUP BY post_id
+                 ) AS current ON current.post_id = draft.post_id
+                 WHERE draft.post_id = posts.id
+                   AND draft.version = ?
+                   AND current.version = ?
+               )`,
+          )
+          .bind(createdAt, postId, postId, expectedDraftVersion, expectedRevisionVersion),
+        database
+          .prepare(
+            `INSERT INTO post_revisions (
+               id, post_id, version, title, content_version, content_json,
+               excerpt, metadata_json, author_id, created_at
+             )
+             SELECT ?, draft.post_id, current.version + 1, draft.title,
+               draft.content_version, draft.content_json, draft.excerpt,
+               draft.metadata_json, ?, ?
+             FROM post_drafts AS draft
+             JOIN (
+               SELECT post_id, MAX(version) AS version
+               FROM post_revisions
+               WHERE post_id = ?
+               GROUP BY post_id
+             ) AS current ON current.post_id = draft.post_id
+             WHERE draft.post_id = ?
+               AND draft.version = ?
+               AND current.version = ?
+             RETURNING id, post_id AS "postId", version, title,
+               content_version AS "contentVersion", content_json AS "contentJson",
+               excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+               created_at AS "createdAt"`,
+          )
+          .bind(
+            revisionId,
+            authorId,
+            createdAt,
+            postId,
+            postId,
+            expectedDraftVersion,
+            expectedRevisionVersion,
+          ),
+      ]);
+      const checkpoint = revisionResult?.results[0] as PostRevision | undefined;
+      const postUpdated = postResult?.meta.changes === 1;
+      const revisionInserted = revisionResult?.meta.changes === 1;
+      if (postUpdated && revisionInserted && checkpoint !== undefined) {
+        return checkpoint;
+      }
+      if (postUpdated || revisionInserted || checkpoint !== undefined) {
+        throw new Error("Draft checkpoint statements returned a partial result");
+      }
+
+      const draft = await database
+        .prepare('SELECT post_id AS "postId" FROM post_drafts WHERE post_id = ?')
+        .bind(postId)
+        .first<{ postId: string }>();
+      if (draft === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post draft was not found");
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.CONFLICT,
+        "Draft checkpoint conflicted with a newer version",
+      );
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to checkpoint post draft",
+        cause,
+      );
+    }
+  };
 
   const searchChunksByQuery = async (query: string): Promise<SearchChunk[]> => {
     const normalized = query.trim();
@@ -234,7 +461,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
   ): Promise<CreatedAuthorPostRevision> => {
     const { author, post, revision } = input;
     try {
-      const [createdAuthors, createdPosts, createdRevisions] = await db.batch([
+      const [createdAuthors, createdPosts, createdRevisions, createdDrafts] = await db.batch([
         db
           .insert(authors)
           .values({
@@ -277,6 +504,20 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
             createdAt: revision.createdAt,
           })
           .returning(),
+        db
+          .insert(postDrafts)
+          .values({
+            postId: post.id,
+            version: 1,
+            title: revision.title,
+            contentVersion: revision.contentVersion,
+            contentJson: revision.contentJson,
+            excerpt: revision.excerpt ?? null,
+            metadataJson: revision.metadataJson ?? "{}",
+            authorId: author.id,
+            updatedAt: revision.createdAt,
+          })
+          .returning(),
       ]);
       const createdAuthor = createdAuthors[0];
       const createdPost = createdPosts[0];
@@ -284,7 +525,8 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       if (
         createdAuthor === undefined ||
         createdPost === undefined ||
-        createdRevision === undefined
+        createdRevision === undefined ||
+        createdDrafts[0] === undefined
       ) {
         throw new Error("Create statements returned no rows");
       }
@@ -437,14 +679,191 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     }
   };
 
+  const restoreDraft = async ({
+    postId,
+    sourceRevisionId,
+    expectedDraftVersion,
+    expectedRevisionVersion,
+    revisionId,
+    authorId,
+    createdAt,
+    updatedAt,
+  }: RestoreDraftInput): Promise<RestoredDraft> => {
+    try {
+      const [postResult, revisionResult, draftResult] = await database.batch([
+        database
+          .prepare(
+            `UPDATE posts
+             SET updated_at = ?
+             WHERE id = ?
+               AND EXISTS (
+                 SELECT 1
+                 FROM post_revisions AS source
+                 JOIN post_drafts AS draft ON draft.post_id = source.post_id
+                 JOIN (
+                   SELECT post_id, MAX(version) AS version
+                   FROM post_revisions
+                   WHERE post_id = ?
+                   GROUP BY post_id
+                 ) AS current ON current.post_id = source.post_id
+                 WHERE source.post_id = posts.id
+                   AND source.id = ?
+                   AND source.post_id = ?
+                   AND draft.version = ?
+                   AND current.version = ?
+               )`,
+          )
+          .bind(
+            updatedAt,
+            postId,
+            postId,
+            sourceRevisionId,
+            postId,
+            expectedDraftVersion,
+            expectedRevisionVersion,
+          ),
+        database
+          .prepare(
+            `INSERT INTO post_revisions (
+               id, post_id, version, title, content_version, content_json,
+               excerpt, metadata_json, author_id, created_at
+             )
+             SELECT ?, source.post_id, current.version + 1, source.title,
+               source.content_version, source.content_json, source.excerpt,
+               source.metadata_json, ?, ?
+             FROM post_revisions AS source
+             JOIN posts AS post ON post.id = source.post_id
+             JOIN post_drafts AS draft ON draft.post_id = source.post_id
+             JOIN (
+               SELECT post_id, MAX(version) AS version
+               FROM post_revisions
+               WHERE post_id = ?
+               GROUP BY post_id
+             ) AS current ON current.post_id = source.post_id
+             WHERE post.id = ?
+               AND source.id = ?
+               AND source.post_id = ?
+               AND draft.version = ?
+               AND current.version = ?
+             RETURNING id, post_id AS "postId", version, title,
+               content_version AS "contentVersion", content_json AS "contentJson",
+               excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+               created_at AS "createdAt"`,
+          )
+          .bind(
+            revisionId,
+            authorId,
+            createdAt,
+            postId,
+            postId,
+            sourceRevisionId,
+            postId,
+            expectedDraftVersion,
+            expectedRevisionVersion,
+          ),
+        database
+          .prepare(
+            `UPDATE post_drafts
+             SET title = revision.title,
+               content_version = revision.content_version,
+               content_json = revision.content_json,
+               excerpt = revision.excerpt,
+               metadata_json = revision.metadata_json,
+               author_id = ?,
+               updated_at = ?,
+               version = post_drafts.version + 1
+             FROM post_revisions AS revision
+             WHERE post_drafts.post_id = ?
+               AND post_drafts.version = ?
+               AND revision.id = ?
+               AND revision.post_id = ?
+             RETURNING post_drafts.post_id AS "postId", post_drafts.version,
+               post_drafts.title,
+               post_drafts.content_version AS "contentVersion",
+               post_drafts.content_json AS "contentJson",
+               post_drafts.excerpt,
+               post_drafts.metadata_json AS "metadataJson",
+               post_drafts.author_id AS "authorId",
+               post_drafts.updated_at AS "updatedAt"`,
+          )
+          .bind(authorId, updatedAt, postId, expectedDraftVersion, revisionId, postId),
+      ]);
+      const postUpdated = postResult?.meta.changes === 1;
+      const restoredRevision = revisionResult?.results[0] as PostRevision | undefined;
+      const restoredDraft = draftResult?.results[0] as PostDraft | undefined;
+      const revisionInserted = revisionResult?.meta.changes === 1;
+      const draftUpdated = draftResult?.meta.changes === 1;
+      if (
+        postUpdated &&
+        revisionInserted &&
+        restoredRevision !== undefined &&
+        draftUpdated &&
+        restoredDraft !== undefined
+      ) {
+        return { draft: restoredDraft, revision: restoredRevision };
+      }
+      if (
+        postUpdated ||
+        revisionInserted ||
+        restoredRevision !== undefined ||
+        draftUpdated ||
+        restoredDraft !== undefined
+      ) {
+        throw new Error("Restore statements returned a partial result");
+      }
+
+      const post = await database
+        .prepare("SELECT id FROM posts WHERE id = ?")
+        .bind(postId)
+        .first<{ id: string }>();
+      if (post === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post was not found");
+      }
+
+      const draft = await database
+        .prepare("SELECT post_id FROM post_drafts WHERE post_id = ?")
+        .bind(postId)
+        .first<{ post_id: string }>();
+      if (draft === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post draft was not found");
+      }
+
+      const source = await database
+        .prepare("SELECT id FROM post_revisions WHERE id = ? AND post_id = ?")
+        .bind(sourceRevisionId, postId)
+        .first<{ id: string }>();
+      if (source === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post revision was not found");
+      }
+
+      throw new RepositoryError(
+        RepositoryErrorCode.CONFLICT,
+        "Draft restore conflicted with a newer version",
+      );
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to restore post draft",
+        cause,
+      );
+    }
+  };
+
   return {
     createAuthorPostRevision,
     appendRevision,
     restoreRevision,
+    restoreDraft,
+    saveDraft,
+    checkpointDraft,
     getAuthor,
     getPost,
     getPostBySlug,
     getRevision,
+    getDraft,
     getPostAggregate,
     purgePost,
     searchChunks: searchChunksByQuery,
