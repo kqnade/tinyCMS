@@ -20,8 +20,8 @@ The authoring path is usable after deployment behind Cloudflare Access. Publicat
 | Application | Local URL | Current behavior |
 | --- | --- | --- |
 | Public Worker | `http://127.0.0.1:8787` | Hono health endpoint and public-only routing boundary |
-| Admin Worker | `http://127.0.0.1:8788` | Access-protected editorial API and built Studio assets |
-| Studio | `http://127.0.0.1:5173` | Focused editor development server; authenticated API requests are not proxied |
+| Admin Worker | `http://127.0.0.1:8788` | Editorial API and built Studio assets; local development authentication is loopback-only |
+| Studio | `http://127.0.0.1:5173` | Focused editor development server with its API proxied to the local Admin Worker |
 
 ## Development
 
@@ -32,20 +32,19 @@ mise trust
 mise install
 mise run install
 pnpm build
-cd apps/admin-worker
-mise exec -- wrangler d1 migrations apply CMS_DB --local
-cd ../..
 mise run dev
 ```
+
+`mise run dev` applies pending migrations to the local Admin D1 database before starting the development servers.
 
 The development servers bind only to `127.0.0.1`. Check the Worker boundaries with:
 
 ```sh
 curl http://127.0.0.1:8787/healthz
-curl -i -H 'Host: localhost' http://127.0.0.1:8788/healthz
+curl -i http://127.0.0.1:8788/healthz
 ```
 
-The public request returns the health response. The Admin Worker fails closed with the tracked local defaults, so the admin request returns `401` with `AUTH_REQUIRED` until it receives a valid `Cf-Access-Jwt-Assertion` header and valid Access configuration.
+The public and Admin requests return their health responses. The tracked Admin configuration enables a development identity only when the configured host and request host are the same loopback address. Other hosts remain protected by Cloudflare Access.
 
 The standalone Vite server is useful for Studio UI development. A production build serves the Studio from the Admin Worker through Workers Static Assets:
 
@@ -54,7 +53,7 @@ pnpm build
 pnpm --dir apps/admin-worker dev
 ```
 
-The local Admin Worker deliberately has no authentication bypass. Its API integration tests use signed Access fixtures; use an isolated Cloudflare staging deployment behind Access for an interactive end-to-end authoring session.
+Cloudflare Access remains required outside the explicit loopback development mode. Its API integration tests cover both the local boundary and signed Access assertions.
 
 Run the complete local quality gate with:
 
@@ -76,9 +75,10 @@ The Admin Worker requires these non-secret variables:
 
 - `ADMIN_HOST`: the exact canonical administration hostname;
 - `ACCESS_TEAM_DOMAIN`: the bare Cloudflare Access hostname, such as `team.cloudflareaccess.com`, without a scheme, path, or port;
-- `ACCESS_AUD`: the exact application audience tag, which must be present in the verified token's `aud` claim.
+- `ACCESS_AUD`: the exact application audience tag, which must be present in the verified token's `aud` claim;
+- `LOCAL_DEV_AUTH`: set to `1` only with a loopback `ADMIN_HOST` for local development without Cloudflare Access.
 
-Both values are empty in the tracked local configuration. An assertion presented while either value is empty is rejected with `AUTH_INVALID`.
+The two Access values are empty in the tracked local configuration. An assertion presented while either value is empty is rejected with `AUTH_INVALID`.
 
 Dotenv files and `.dev.vars` files are ignored. Commit an example file only when the application consumes the corresponding value, and include placeholders rather than credentials. Production identifiers, account-specific routes, and secrets must not be added to the public template.
 

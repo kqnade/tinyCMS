@@ -11,9 +11,10 @@
     "run_worker_first": ["/api", "/api/*", "/healthz"]
   },
   "vars": {
-    "ADMIN_HOST": "localhost",
+    "ADMIN_HOST": "127.0.0.1",
     "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": ""
+    "ACCESS_AUD": "",
+    "LOCAL_DEV_AUTH": "1"
   },
   "d1_databases": [
     {

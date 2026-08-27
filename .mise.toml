@@ -13,4 +13,9 @@ run = "pnpm check"
 
 [tasks.dev]
 description = "Run all development applications"
+depends = ["dev:migrate"]
 run = "pnpm dev"
+
+[tasks."dev:migrate"]
+description = "Apply local Admin D1 migrations"
+run = "pnpm --dir apps/admin-worker exec wrangler d1 migrations apply CMS_DB --local"
