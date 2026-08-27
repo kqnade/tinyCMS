@@ -237,10 +237,12 @@ export const media = sqliteTable(
       .references(() => authors.id, { onUpdate: "restrict", onDelete: "restrict" }),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
+    version: integer("version").notNull().default(1),
   },
   (table) => [
     uniqueIndex("media_r2_key_idx").on(table.r2Key),
     index("media_state_idx").on(table.state, desc(table.createdAt)),
+    index("media_updated_at_id_idx").on(desc(table.updatedAt), desc(table.id)),
     check("media_id_uuidv7_check", uuidv7Check(table.id)),
     check(
       "media_byte_size_check",
@@ -257,6 +259,44 @@ export const media = sqliteTable(
     check("media_state_check", sql`${table.state} IN ('pending', 'ready', 'failed', 'trash')`),
     check("media_created_at_epoch_ms_check", epochMillisecondsCheck(table.createdAt)),
     check("media_updated_at_epoch_ms_check", epochMillisecondsCheck(table.updatedAt)),
+    check(
+      "media_version_check",
+      sql`typeof(${table.version}) = 'integer' AND ${table.version} >= 1`,
+    ),
+  ],
+);
+
+export const mediaVariants = sqliteTable(
+  "media_variants",
+  {
+    mediaId: text("media_id")
+      .notNull()
+      .references(() => media.id, { onUpdate: "restrict", onDelete: "cascade" }),
+    name: text("name").notNull(),
+    format: text("format").notNull(),
+    r2Key: text("r2_key").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.mediaId, table.name] }),
+    uniqueIndex("media_variants_r2_key_idx").on(table.r2Key),
+    check("media_variants_format_check", sql`${table.format} IN ('avif', 'webp')`),
+    check(
+      "media_variants_byte_size_check",
+      sql`typeof(${table.byteSize}) = 'integer' AND ${table.byteSize} >= 0`,
+    ),
+    check(
+      "media_variants_width_check",
+      sql`typeof(${table.width}) = 'integer' AND ${table.width} > 0`,
+    ),
+    check(
+      "media_variants_height_check",
+      sql`typeof(${table.height}) = 'integer' AND ${table.height} > 0`,
+    ),
+    check("media_variants_created_at_epoch_ms_check", epochMillisecondsCheck(table.createdAt)),
   ],
 );
 
@@ -424,6 +464,7 @@ export const schema = {
   tags,
   postTags,
   media,
+  mediaVariants,
   redirects,
   publicationJobs,
   siteSettings,

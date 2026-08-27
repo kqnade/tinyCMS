@@ -12,6 +12,7 @@ describe("editorial D1 migration", () => {
       "authors",
       "d1_migrations",
       "media",
+      "media_variants",
       "post_drafts",
       "post_revisions",
       "post_tags",

@@ -12,6 +12,8 @@ describe("editorial D1 metadata", () => {
       { type: "index", name: "authors_access_subject_idx" },
       { type: "index", name: "media_r2_key_idx" },
       { type: "index", name: "media_state_idx" },
+      { type: "index", name: "media_updated_at_id_idx" },
+      { type: "index", name: "media_variants_r2_key_idx" },
       { type: "index", name: "post_revisions_author_idx" },
       { type: "index", name: "post_revisions_id_post_idx" },
       { type: "index", name: "post_revisions_post_created_at_idx" },
