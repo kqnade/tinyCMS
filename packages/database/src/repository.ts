@@ -5,7 +5,7 @@ import {
   postDrafts,
   postRevisions,
   posts,
-  publicationJobs,
+  type publicationJobs,
   schema,
   type searchChunks,
 } from "./schema";
