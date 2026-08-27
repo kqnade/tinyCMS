@@ -108,6 +108,32 @@ describe("public worker", () => {
     expect(readPublishedEntry).toHaveBeenCalledWith("published-entry", "markdown");
   });
 
+  it("serves a ready public media derivative", async () => {
+    const readPublicMedia = vi.fn(async () => ({
+      body: new Uint8Array([1, 2, 3]),
+      etag: '"media-etag"',
+      format: "webp" as const,
+    }));
+    const testApp = createPublicApp(undefined, {
+      readPublishedEntry: vi.fn(),
+      readPublicMedia,
+    } as never);
+    const mediaId = "018f0e5d-6a25-7b01-8f4a-7d62a5d3e410";
+
+    const response = await testApp.fetch(
+      new Request(`https://public.example.test/media/${mediaId}`, {
+        headers: { Accept: "image/webp" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/webp");
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    expect(response.headers.get("ETag")).toBe('"media-etag"');
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    expect(readPublicMedia).toHaveBeenCalledWith(mediaId, "webp");
+  });
+
   it("reports health with a generated request ID", async () => {
     const response = await exports.default.fetch("https://public.example.test/healthz");
     const requestId = response.headers.get("X-Request-Id");

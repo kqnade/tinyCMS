@@ -17,6 +17,10 @@
     {
       "binding": "CONTENT_ARTIFACTS",
       "bucket_name": "tinycms-content-artifacts-local"
+    },
+    {
+      "binding": "MEDIA_DERIVATIVES",
+      "bucket_name": "tinycms-media-derivatives-local"
     }
   ]
 }

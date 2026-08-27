@@ -1,10 +1,11 @@
-import { errorResponse, successResponse } from "@tinycms/contracts";
+import { errorResponse, parseUuidV7, successResponse } from "@tinycms/contracts";
 import { type Context, Hono } from "hono";
 
 type PublicWorker = {
   Bindings: {
     CMS_DB?: D1Database;
     CONTENT_ARTIFACTS?: R2Bucket;
+    MEDIA_DERIVATIVES?: R2Bucket;
   };
   Variables: {
     requestId: string;
@@ -30,6 +31,14 @@ export type PublicContentSource = {
     slug: string,
     format: PublicArtifactFormat,
   ) => Promise<PublishedEntry | null>;
+  readonly readPublicMedia: (
+    mediaId: string,
+    preferredFormat: "avif" | "webp",
+  ) => Promise<{
+    readonly body: BodyInit;
+    readonly etag: string;
+    readonly format: "avif" | "webp";
+  } | null>;
 };
 
 const SECURITY_HEADERS = {
@@ -54,9 +63,16 @@ function requestsMarkdown(accept: string | undefined): boolean {
   });
 }
 
-function createPublicContentSource(database: D1Database, artifacts: R2Bucket): PublicContentSource {
+function createPublicContentSource(
+  database: D1Database,
+  contentArtifacts?: R2Bucket,
+  mediaDerivatives?: R2Bucket,
+): PublicContentSource {
   return {
     readPublishedEntry: async (slug, format) => {
+      if (contentArtifacts === undefined) {
+        throw new Error("Public content artifacts are unavailable");
+      }
       const post = await database
         .prepare(
           `SELECT id, slug, canonical_url AS "canonicalUrl", noindex,
@@ -79,7 +95,7 @@ function createPublicContentSource(database: D1Database, artifacts: R2Bucket): P
       }
       const extension = format === "html" ? "html" : "md";
       const key = `posts/${post.id}/revisions/${post.activePublishedRevisionId}.${extension}`;
-      const artifact = await artifacts.get(key);
+      const artifact = await contentArtifacts.get(key);
       return {
         post: {
           slug: post.slug,
@@ -88,6 +104,30 @@ function createPublicContentSource(database: D1Database, artifacts: R2Bucket): P
         },
         artifact: artifact === null ? null : { body: artifact.body, etag: artifact.httpEtag },
       };
+    },
+    readPublicMedia: async (mediaId, preferredFormat) => {
+      if (mediaDerivatives === undefined) {
+        throw new Error("Public media derivatives are unavailable");
+      }
+      const variant = await database
+        .prepare(
+          `SELECT variants.r2_key AS "r2Key", variants.format
+           FROM media
+           JOIN media_variants AS variants ON variants.media_id = media.id
+           WHERE media.id = ? AND media.state = 'ready'
+           ORDER BY CASE WHEN variants.format = ? THEN 0 ELSE 1 END,
+             variants.width DESC, variants.name ASC
+           LIMIT 1`,
+        )
+        .bind(mediaId, preferredFormat)
+        .first<{ r2Key: string; format: "avif" | "webp" }>();
+      if (variant === null) {
+        return null;
+      }
+      const artifact = await mediaDerivatives.get(variant.r2Key);
+      return artifact === null
+        ? null
+        : { body: artifact.body, etag: artifact.httpEtag, format: variant.format };
     },
   };
 }
@@ -149,7 +189,11 @@ export function createPublicApp(
       configuredContentSource ??
       (context.env.CMS_DB === undefined || context.env.CONTENT_ARTIFACTS === undefined
         ? null
-        : createPublicContentSource(context.env.CMS_DB, context.env.CONTENT_ARTIFACTS));
+        : createPublicContentSource(
+            context.env.CMS_DB,
+            context.env.CONTENT_ARTIFACTS,
+            context.env.MEDIA_DERIVATIVES,
+          ));
     if (contentSource === null) {
       throw new Error("Public content source is unavailable");
     }
@@ -181,6 +225,40 @@ export function createPublicApp(
       return new Response(null, { status: 304, headers });
     }
     return new Response(entry.artifact.body, { status: 200, headers });
+  });
+
+  app.get("/media/:mediaId", async (context) => {
+    const parsedId = parseUuidV7(context.req.param("mediaId"));
+    if (!parsedId.ok) {
+      return context.json(errorResponse("NOT_FOUND", "Not found", context.get("requestId")), 404);
+    }
+    const contentSource =
+      configuredContentSource ??
+      (context.env.CMS_DB === undefined || context.env.MEDIA_DERIVATIVES === undefined
+        ? null
+        : createPublicContentSource(
+            context.env.CMS_DB,
+            context.env.CONTENT_ARTIFACTS,
+            context.env.MEDIA_DERIVATIVES,
+          ));
+    if (contentSource === null) {
+      throw new Error("Public media source is unavailable");
+    }
+    const preferredFormat = context.req.header("Accept")?.includes("image/avif") ? "avif" : "webp";
+    const media = await contentSource.readPublicMedia(parsedId.value, preferredFormat);
+    if (media === null) {
+      return context.json(errorResponse("NOT_FOUND", "Not found", context.get("requestId")), 404);
+    }
+    const headers = new Headers({
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "Content-Type": `image/${media.format}`,
+      ETag: media.etag,
+      Vary: "Accept",
+    });
+    if (context.req.header("If-None-Match") === media.etag) {
+      return new Response(null, { status: 304, headers });
+    }
+    return new Response(media.body, { status: 200, headers });
   });
 
   registerRoutes?.(app);
