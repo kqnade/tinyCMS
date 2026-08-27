@@ -162,43 +162,58 @@ describe("media repository", () => {
     input.media.filename = "photo'); DROP TABLE media; --.jpg";
     await repository.createMediaWithAuthor(input);
 
-    const updated = await repository.updateMediaAlt({
+    await expect(
+      repository.updateMediaAlt({
+        mediaId: input.media.id,
+        expectedVersion: 1,
+        altText: "pending",
+        updatedAt: 1_700_000_000_051,
+      }),
+    ).rejects.toMatchObject({ code: RepositoryErrorCode.CONFLICT });
+    await expect(
+      repository.trashMedia({
+        mediaId: input.media.id,
+        expectedVersion: 1,
+        updatedAt: 1_700_000_000_051,
+      }),
+    ).rejects.toMatchObject({ code: RepositoryErrorCode.CONFLICT });
+
+    await repository.finalizeMedia({
       mediaId: input.media.id,
       expectedVersion: 1,
-      altText: "alt'); UPDATE media SET state = 'ready'; --",
       updatedAt: 1_700_000_000_051,
+      variants: [],
+    });
+
+    const updated = await repository.updateMediaAlt({
+      mediaId: input.media.id,
+      expectedVersion: 2,
+      altText: "alt'); UPDATE media SET state = 'ready'; --",
+      updatedAt: 1_700_000_000_052,
     });
     expect(updated).toMatchObject({
       id: input.media.id,
       filename: input.media.filename,
       altText: "alt'); UPDATE media SET state = 'ready'; --",
-      state: "pending",
-      version: 2,
+      state: "ready",
+      version: 3,
     });
 
     await expect(
       repository.updateMediaAlt({
         mediaId: input.media.id,
-        expectedVersion: 1,
+        expectedVersion: 2,
         altText: "stale",
-        updatedAt: 1_700_000_000_052,
+        updatedAt: 1_700_000_000_053,
       }),
     ).rejects.toMatchObject({ code: RepositoryErrorCode.CONFLICT });
 
     const trashed = await repository.trashMedia({
       mediaId: input.media.id,
-      expectedVersion: 2,
-      updatedAt: 1_700_000_000_053,
+      expectedVersion: 3,
+      updatedAt: 1_700_000_000_054,
     });
-    expect(trashed).toMatchObject({ state: "trash", version: 3 });
-
-    await expect(
-      repository.trashMedia({
-        mediaId: input.media.id,
-        expectedVersion: 2,
-        updatedAt: 1_700_000_000_054,
-      }),
-    ).rejects.toMatchObject({ code: RepositoryErrorCode.CONFLICT });
+    expect(trashed).toMatchObject({ state: "trash", version: 4 });
 
     await expect(
       repository.trashMedia({
@@ -209,11 +224,19 @@ describe("media repository", () => {
     ).rejects.toMatchObject({ code: RepositoryErrorCode.CONFLICT });
 
     await expect(
+      repository.trashMedia({
+        mediaId: input.media.id,
+        expectedVersion: 4,
+        updatedAt: 1_700_000_000_056,
+      }),
+    ).rejects.toMatchObject({ code: RepositoryErrorCode.CONFLICT });
+
+    await expect(
       repository.updateMediaAlt({
         mediaId: input.media.id,
-        expectedVersion: 3,
+        expectedVersion: 4,
         altText: "must remain unchanged",
-        updatedAt: 1_700_000_000_056,
+        updatedAt: 1_700_000_000_057,
       }),
     ).rejects.toMatchObject({ code: RepositoryErrorCode.CONFLICT });
 
@@ -222,7 +245,7 @@ describe("media repository", () => {
         mediaId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3a899",
         expectedVersion: 1,
         altText: "missing",
-        updatedAt: 1_700_000_000_057,
+        updatedAt: 1_700_000_000_058,
       }),
     ).rejects.toMatchObject({ code: RepositoryErrorCode.NOT_FOUND });
   });

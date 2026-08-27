@@ -360,7 +360,7 @@ export function createMediaRepository(database: D1Database): MediaRepository {
         .prepare(
           `UPDATE media
            SET alt_text = ?, updated_at = ?, version = version + 1
-           WHERE id = ? AND version = ? AND state <> 'trash'
+           WHERE id = ? AND version = ? AND state IN ('ready', 'failed')
            RETURNING ${mediaColumns}`,
         )
         .bind(input.altText, input.updatedAt, input.mediaId, input.expectedVersion)
@@ -391,7 +391,7 @@ export function createMediaRepository(database: D1Database): MediaRepository {
         .prepare(
           `UPDATE media
            SET state = 'trash', updated_at = ?, version = version + 1
-           WHERE id = ? AND version = ? AND state <> 'trash'
+           WHERE id = ? AND version = ? AND state IN ('ready', 'failed')
            RETURNING ${mediaColumns}`,
         )
         .bind(input.updatedAt, input.mediaId, input.expectedVersion)
