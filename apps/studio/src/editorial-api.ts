@@ -21,6 +21,74 @@ import {
   WRITE_BOUNDARY_VALUE,
 } from "@tinycms/contracts";
 
+export const ADMIN_MEDIA_ROUTE = "/api/v1/admin/media" as const;
+export const ADMIN_MEDIA_ITEM_ROUTE = `${ADMIN_MEDIA_ROUTE}/:mediaId` as const;
+export const ADMIN_MEDIA_ORIGINAL_ROUTE = `${ADMIN_MEDIA_ITEM_ROUTE}/original` as const;
+
+export type MediaAssetState = "pending" | "ready" | "failed" | "trash";
+
+export type MediaVariantFormat = "avif" | "webp";
+
+export type MediaVariant = {
+  name: string;
+  width: number;
+  height: number;
+  format: MediaVariantFormat;
+  byteSize: number;
+  url: string;
+};
+
+export type MediaAsset = {
+  id: string;
+  filename: string;
+  mediaType: string;
+  byteSize: number;
+  width: number;
+  height: number;
+  altText: string;
+  contentHash: string;
+  state: MediaAssetState;
+  version: number;
+  variants: MediaVariant[];
+  createdBy: string;
+  createdAt: `${string}Z`;
+  updatedAt: `${string}Z`;
+};
+
+export type MediaListQuery = {
+  cursor?: string;
+  limit?: number;
+};
+
+export type MediaRouteParams = {
+  mediaId: string;
+};
+
+export type UpdateMediaRequest = {
+  expectedVersion: number;
+  altText: string;
+};
+
+export type DeleteMediaRequest = {
+  expectedVersion: number;
+};
+
+export type MediaResponse = { data: MediaAsset; meta: { requestId: string } };
+
+export type MediaListResponse = {
+  data: CursorPage<MediaAsset>;
+  meta: { requestId: string };
+};
+
+export type MediaApi = {
+  listMedia: (query?: MediaListQuery) => Promise<CursorPage<MediaAsset>>;
+  getMedia: (mediaId: string) => Promise<MediaAsset>;
+  getMediaOriginalUrl: (mediaId: string) => string;
+  uploadMedia: (file: File, altText?: string) => Promise<MediaAsset>;
+  updateMedia: (mediaId: string, request: UpdateMediaRequest) => Promise<MediaAsset>;
+  deleteMedia: (mediaId: string, request: DeleteMediaRequest) => Promise<MediaAsset>;
+};
+
 export type EditorialApi = {
   listPosts: (query?: PostListQuery) => Promise<CursorPage<PostListItemDto>>;
   createPost: (request?: CreatePostRequest) => Promise<PostDto>;
@@ -39,7 +107,7 @@ export type EditorialApi = {
     revisionId: string,
     request: RestorePostRevisionRequest,
   ) => Promise<PostRevisionWriteResultDto>;
-};
+} & MediaApi;
 
 export type EditorialApiErrorKind = "conflict" | "error";
 
@@ -86,7 +154,10 @@ function encodePathPart(value: string): string {
   return encodeURIComponent(value);
 }
 
-function withQuery(path: string, query?: PostListQuery | PostRevisionListQuery): string {
+function withQuery(
+  path: string,
+  query?: PostListQuery | PostRevisionListQuery | MediaListQuery,
+): string {
   if (query === undefined) return path;
   const params = new URLSearchParams();
   if (query.cursor !== undefined) params.set("cursor", query.cursor);
@@ -99,17 +170,40 @@ function requestBody(request: object): string {
   return JSON.stringify(request);
 }
 
+const MEDIA_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const MEDIA_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function assertUploadableMedia(file: File): void {
+  if (file === undefined || file === null) {
+    throw new TypeError("Media file is required");
+  }
+  if (!MEDIA_UPLOAD_TYPES.has(file.type)) {
+    throw new TypeError("Unsupported media type");
+  }
+  if (file.size > MEDIA_UPLOAD_MAX_BYTES) {
+    throw new TypeError("Media file exceeds 20 MiB");
+  }
+}
+
+function mediaOriginalUrl(mediaId: string): string {
+  return ADMIN_MEDIA_ORIGINAL_ROUTE.replace(":mediaId", encodePathPart(mediaId));
+}
+
 export function createEditorialApi(options: EditorialApiOptions = {}): EditorialApi {
   const fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
+
+  type RequestBodyMode = "json" | "multipart";
 
   const request = async <T>(
     path: string,
     init: RequestInit = {},
-    expectsJson = false,
+    bodyMode?: RequestBodyMode,
   ): Promise<T> => {
     const headers = new Headers(init.headers);
-    if (expectsJson) {
+    if (bodyMode === "json") {
       headers.set("Content-Type", "application/json");
+      headers.set(WRITE_BOUNDARY_HEADER, WRITE_BOUNDARY_VALUE);
+    } else if (bodyMode === "multipart") {
       headers.set(WRITE_BOUNDARY_HEADER, WRITE_BOUNDARY_VALUE);
     }
 
@@ -141,14 +235,14 @@ export function createEditorialApi(options: EditorialApiOptions = {}): Editorial
   return {
     listPosts: (query) => request<CursorPage<PostListItemDto>>(withQuery(ADMIN_POSTS_ROUTE, query)),
     createPost: (body = {}) =>
-      request<PostDto>(ADMIN_POSTS_ROUTE, { body: requestBody(body), method: "POST" }, true),
+      request<PostDto>(ADMIN_POSTS_ROUTE, { body: requestBody(body), method: "POST" }, "json"),
     getPost: (postId) =>
       request<PostDto>(`${ADMIN_POST_ROUTE.replace(":postId", encodePathPart(postId))}`),
     saveDraft: (postId, body) =>
       request<PostDto>(
         ADMIN_POST_DRAFT_ROUTE.replace(":postId", encodePathPart(postId)),
         { body: requestBody(body), method: "PUT" },
-        true,
+        "json",
       ),
     listRevisions: (postId, query) =>
       request<CursorPage<PostRevisionListItemDto>>(
@@ -158,7 +252,7 @@ export function createEditorialApi(options: EditorialApiOptions = {}): Editorial
       request<PostRevisionWriteResultDto>(
         ADMIN_POST_REVISIONS_ROUTE.replace(":postId", encodePathPart(postId)),
         { body: requestBody(body), method: "POST" },
-        true,
+        "json",
       ),
     restoreRevision: (postId, revisionId, body) =>
       request<PostRevisionWriteResultDto>(
@@ -167,10 +261,35 @@ export function createEditorialApi(options: EditorialApiOptions = {}): Editorial
           encodePathPart(revisionId),
         ),
         { body: requestBody(body), method: "POST" },
-        true,
+        "json",
+      ),
+    listMedia: (query) => request<CursorPage<MediaAsset>>(withQuery(ADMIN_MEDIA_ROUTE, query)),
+    getMedia: (mediaId) =>
+      request<MediaAsset>(ADMIN_MEDIA_ITEM_ROUTE.replace(":mediaId", encodePathPart(mediaId))),
+    getMediaOriginalUrl: mediaOriginalUrl,
+    uploadMedia: async (file, altText) => {
+      assertUploadableMedia(file);
+      const form = new FormData();
+      form.append("file", file);
+      if (altText !== undefined) form.append("altText", altText);
+      return request<MediaAsset>(ADMIN_MEDIA_ROUTE, { body: form, method: "POST" }, "multipart");
+    },
+    updateMedia: (mediaId, body) =>
+      request<MediaAsset>(
+        ADMIN_MEDIA_ITEM_ROUTE.replace(":mediaId", encodePathPart(mediaId)),
+        { body: requestBody(body), method: "PATCH" },
+        "json",
+      ),
+    deleteMedia: (mediaId, body) =>
+      request<MediaAsset>(
+        ADMIN_MEDIA_ITEM_ROUTE.replace(":mediaId", encodePathPart(mediaId)),
+        { body: requestBody(body), method: "DELETE" },
+        "json",
       ),
   };
 }
+
+export const getMediaOriginalUrl = mediaOriginalUrl;
 
 export function isEditorialConflict(error: unknown): error is EditorialApiError {
   return error instanceof EditorialApiError && error.kind === "conflict";
