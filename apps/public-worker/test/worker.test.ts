@@ -83,6 +83,31 @@ describe("public worker", () => {
     expect(readPublishedEntry).toHaveBeenCalledWith("published-entry", "html");
   });
 
+  it.each([
+    ["explicit Markdown path", "/entry/published-entry.md", {}],
+    ["Markdown Accept header", "/entry/published-entry", { Accept: "text/markdown" }],
+  ])("serves Markdown through the %s", async (_label, path, headers) => {
+    const readPublishedEntry = vi.fn(async () => ({
+      post: {
+        slug: "published-entry",
+        canonicalUrl: null,
+        noindex: 1 as const,
+      },
+      artifact: { body: "# Published entry\n", etag: '"published-markdown-etag"' },
+    }));
+    const testApp = createPublicApp(undefined, { readPublishedEntry } as never);
+
+    const response = await testApp.fetch(
+      new Request(`https://public.example.test${path}`, { headers }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/markdown; charset=utf-8");
+    expect(response.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    expect(await response.text()).toBe("# Published entry\n");
+    expect(readPublishedEntry).toHaveBeenCalledWith("published-entry", "markdown");
+  });
+
   it("reports health with a generated request ID", async () => {
     const response = await exports.default.fetch("https://public.example.test/healthz");
     const requestId = response.headers.get("X-Request-Id");

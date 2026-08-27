@@ -44,6 +44,16 @@ const SECURITY_HEADERS = {
 
 type RouteRegistrar = (app: Hono<PublicWorker>) => void;
 
+function requestsMarkdown(accept: string | undefined): boolean {
+  if (accept === undefined) return false;
+  return accept.split(",").some((range) => {
+    const [mediaType, ...parameters] = range.split(";").map((part) => part.trim().toLowerCase());
+    if (mediaType !== "text/markdown") return false;
+    const quality = parameters.find((parameter) => parameter.startsWith("q="));
+    return quality === undefined || Number(quality.slice(2)) > 0;
+  });
+}
+
 function createPublicContentSource(database: D1Database, artifacts: R2Bucket): PublicContentSource {
   return {
     readPublishedEntry: async (slug, format) => {
@@ -129,7 +139,9 @@ export function createPublicApp(
   });
 
   app.get("/entry/:slug", async (context) => {
-    const slug = context.req.param("slug");
+    const pathSlug = context.req.param("slug");
+    const explicitMarkdown = pathSlug.endsWith(".md");
+    const slug = explicitMarkdown ? pathSlug.slice(0, -3) : pathSlug;
     if (!/^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$/.test(slug)) {
       return context.json(errorResponse("NOT_FOUND", "Not found", context.get("requestId")), 404);
     }
@@ -141,7 +153,9 @@ export function createPublicApp(
     if (contentSource === null) {
       throw new Error("Public content source is unavailable");
     }
-    const entry = await contentSource.readPublishedEntry(slug, "html");
+    const format =
+      explicitMarkdown || requestsMarkdown(context.req.header("Accept")) ? "markdown" : "html";
+    const entry = await contentSource.readPublishedEntry(slug, format);
     if (entry === null) {
       return context.json(errorResponse("NOT_FOUND", "Not found", context.get("requestId")), 404);
     }
@@ -154,7 +168,8 @@ export function createPublicApp(
 
     const headers = new Headers({
       "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
-      "Content-Type": "text/html; charset=utf-8",
+      "Content-Type":
+        format === "markdown" ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8",
       ETag: entry.artifact.etag,
       Link: `<${entry.post.canonicalUrl ?? new URL(`/entry/${entry.post.slug}`, context.req.url).href}>; rel="canonical"`,
       Vary: "Accept",
