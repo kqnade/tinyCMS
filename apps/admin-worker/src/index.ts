@@ -601,12 +601,151 @@ function strongEtagMatches(header: string | null, etag: string): boolean {
     .some((value) => value === "*" || value === etag);
 }
 
+const HTTP_DATE_SHORT_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const HTTP_DATE_LONG_WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+const HTTP_DATE_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+const HTTP_DATE_IMF_FIXDATE =
+  /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), ([0-9]{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT$/;
+const HTTP_DATE_RFC850 =
+  /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), ([0-9]{2})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-([0-9]{2}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT$/;
+const HTTP_DATE_ASCTIME =
+  /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?:( [0-9])|([0-9]{2})) ([0-9]{2}):([0-9]{2}):([0-9]{2}) ([0-9]{4})$/;
+
+function createHttpDateTimestamp(
+  weekday: number,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): number | undefined {
+  if (
+    !Number.isInteger(weekday) ||
+    weekday < 0 ||
+    weekday > 6 ||
+    !Number.isInteger(year) ||
+    year < 1900 ||
+    year > 9999 ||
+    !Number.isInteger(month) ||
+    month < 0 ||
+    month > 11 ||
+    !Number.isInteger(day) ||
+    day < 1 ||
+    day > 31 ||
+    !Number.isInteger(hour) ||
+    hour < 0 ||
+    hour > 23 ||
+    !Number.isInteger(minute) ||
+    minute < 0 ||
+    minute > 59 ||
+    !Number.isInteger(second) ||
+    second < 0 ||
+    second > 60 ||
+    (second === 60 && (hour !== 23 || minute !== 59))
+  ) {
+    return undefined;
+  }
+
+  const leapSecond = second === 60;
+  const date = new Date(0);
+  date.setUTCFullYear(year, month, day);
+  date.setUTCHours(hour, minute, leapSecond ? 59 : second, 0);
+
+  if (!Number.isFinite(date.getTime())) {
+    return undefined;
+  }
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month ||
+    date.getUTCDate() !== day ||
+    date.getUTCHours() !== hour ||
+    date.getUTCMinutes() !== minute ||
+    date.getUTCSeconds() !== (leapSecond ? 59 : second) ||
+    date.getUTCDay() !== weekday
+  ) {
+    return undefined;
+  }
+
+  const timestamp = date.getTime() + (leapSecond ? 1000 : 0);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function parseHttpDate(header: string): number | undefined {
+  let match = HTTP_DATE_IMF_FIXDATE.exec(header);
+  if (match !== null && match[0] === header) {
+    return createHttpDateTimestamp(
+      HTTP_DATE_SHORT_WEEKDAYS.indexOf(match[1] ?? ""),
+      Number(match[4]),
+      HTTP_DATE_MONTHS.indexOf(match[3] ?? ""),
+      Number(match[2]),
+      Number(match[5]),
+      Number(match[6]),
+      Number(match[7]),
+    );
+  }
+
+  match = HTTP_DATE_RFC850.exec(header);
+  if (match !== null && match[0] === header) {
+    const currentYear = new Date().getUTCFullYear();
+    let year = Math.floor(currentYear / 100) * 100 + Number(match[4]);
+    if (year - currentYear > 50) {
+      year -= 100;
+    }
+    return createHttpDateTimestamp(
+      HTTP_DATE_LONG_WEEKDAYS.indexOf(match[1] ?? ""),
+      year,
+      HTTP_DATE_MONTHS.indexOf(match[3] ?? ""),
+      Number(match[2]),
+      Number(match[5]),
+      Number(match[6]),
+      Number(match[7]),
+    );
+  }
+
+  match = HTTP_DATE_ASCTIME.exec(header);
+  if (match !== null && match[0] === header) {
+    return createHttpDateTimestamp(
+      HTTP_DATE_SHORT_WEEKDAYS.indexOf(match[1] ?? ""),
+      Number(match[8]),
+      HTTP_DATE_MONTHS.indexOf(match[2] ?? ""),
+      Number(match[3] ?? match[4]),
+      Number(match[5]),
+      Number(match[6]),
+      Number(match[7]),
+    );
+  }
+
+  return undefined;
+}
+
 function ifUnmodifiedSinceFailed(header: string | null, uploaded: Date): boolean {
   if (header === null) return false;
-  const timestamp = Date.parse(header);
+  const timestamp = parseHttpDate(header);
   return (
-    Number.isFinite(timestamp) &&
-    Math.floor(uploaded.getTime() / 1000) > Math.floor(timestamp / 1000)
+    timestamp !== undefined && Math.floor(uploaded.getTime() / 1000) > Math.floor(timestamp / 1000)
   );
 }
 

@@ -419,7 +419,13 @@ describe("admin media adapter", () => {
     expect(condition?.get("If-None-Match")).toBe('"original-etag"');
   });
 
-  it("returns an empty 412 for a stale If-Unmodified-Since precondition", async () => {
+  it.each([
+    ["IMF-fixdate", "Thu, 27 Aug 2026 00:00:00 GMT"],
+    ["RFC 850", "Thursday, 27-Aug-26 00:00:00 GMT"],
+    ["ANSI C asctime", "Thu Aug 27 00:00:00 2026"],
+    ["ANSI C asctime with a single-digit day", "Sun Nov  6 08:49:37 1994"],
+    ["RFC 850 with the two-digit year adjustment", "Sunday, 06-Nov-94 08:49:37 GMT"],
+  ])("returns an empty 412 for a stale %s precondition", async (_format, headerValue) => {
     const access = await accessAssertion();
     const { app, originals } = originalFixture(
       access,
@@ -432,7 +438,7 @@ describe("admin media adapter", () => {
       {
         headers: {
           "Cf-Access-Jwt-Assertion": access.assertion,
-          "If-Unmodified-Since": "Thu, 27 Aug 2026 00:00:00 GMT",
+          "If-Unmodified-Since": headerValue,
           "If-None-Match": '"original-etag"',
         },
       },
@@ -478,6 +484,83 @@ describe("admin media adapter", () => {
         headers: {
           "Cf-Access-Jwt-Assertion": access.assertion,
           "If-Unmodified-Since": "not-a-date",
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(ORIGINAL_BYTES);
+    const condition = originals.get.mock.calls[0]?.[1]?.onlyIf;
+    expect(condition?.get("If-Unmodified-Since")).toBeNull();
+  });
+
+  it.each(["0", "2026"])(
+    "ignores a non-HTTP If-Unmodified-Since date value %s",
+    async (headerValue) => {
+      const access = await accessAssertion();
+      const { app, originals } = originalFixture(access, "If-Unmodified-Since");
+
+      const response = await app.request(
+        `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+        {
+          headers: {
+            "Cf-Access-Jwt-Assertion": access.assertion,
+            "If-Unmodified-Since": headerValue,
+          },
+        },
+        { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+      );
+
+      expect(response.status).toBe(200);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(ORIGINAL_BYTES);
+      const condition = originals.get.mock.calls[0]?.[1]?.onlyIf;
+      expect(condition?.get("If-Unmodified-Since")).toBeNull();
+    },
+  );
+
+  it.each([
+    ["a calendar-normalized day", "Fri, 31 Apr 2026 00:00:00 GMT"],
+    ["a wrong weekday", "Fri, 27 Aug 2026 00:00:00 GMT"],
+    ["a list of dates", "Thu, 27 Aug 2026 00:00:00 GMT, Thu, 27 Aug 2026 00:00:00 GMT"],
+    ["trailing junk", "Thu, 27 Aug 2026 00:00:00 GMT trailing"],
+    ["an out-of-range hour", "Thu, 27 Aug 2026 24:00:00 GMT"],
+    ["a non-leap-second value", "Thu, 27 Aug 2026 00:00:60 GMT"],
+  ])("ignores If-Unmodified-Since with %s", async (_reason, headerValue) => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(access, "If-Unmodified-Since");
+
+    const response = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Unmodified-Since": headerValue,
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(ORIGINAL_BYTES);
+    const condition = originals.get.mock.calls[0]?.[1]?.onlyIf;
+    expect(condition?.get("If-Unmodified-Since")).toBeNull();
+  });
+
+  it("accepts an RFC 9110 leap second without normalizing an ordinary second", async () => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(
+      access,
+      "If-Unmodified-Since",
+      new Date("2017-01-01T00:00:00.000Z"),
+    );
+
+    const response = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Unmodified-Since": "Sat, 31 Dec 2016 23:59:60 GMT",
         },
       },
       { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
