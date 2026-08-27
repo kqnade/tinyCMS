@@ -80,6 +80,42 @@ async function accessAssertion() {
   };
 }
 
+type OriginalFixtureAccess = Awaited<ReturnType<typeof accessAssertion>>;
+
+const ORIGINAL_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+
+function originalFixture(
+  access: OriginalFixtureAccess,
+  bodylessWhen?: string,
+  uploaded = new Date("2026-08-27T00:00:00.000Z"),
+) {
+  const object = {
+    httpEtag: '"original-etag"',
+    uploaded,
+    httpMetadata: { contentType: "image/jpeg" },
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(ORIGINAL_BYTES);
+        controller.close();
+      },
+    }),
+  };
+  const originals = {
+    get: vi.fn(async (_key: string, options?: { onlyIf?: Headers }) => {
+      if (bodylessWhen !== undefined && options?.onlyIf?.get(bodylessWhen) !== null) {
+        const { body: _body, ...metadata } = object;
+        return metadata;
+      }
+      return object;
+    }),
+  };
+  const app = createAdminApp({
+    mediaApplication: mediaApplication(),
+    fetch: async () => new Response(JSON.stringify({ keys: [access.publicKey] })),
+  });
+  return { app, originals };
+}
+
 function mediaApplication(overrides: Partial<MediaApplication> = {}): MediaApplication {
   return {
     createMedia: vi.fn(async () => ASSET),
@@ -295,6 +331,7 @@ describe("admin media adapter", () => {
     const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
     const object = {
       httpEtag: '"original-etag"',
+      uploaded: new Date("2026-08-27T00:00:00.000Z"),
       httpMetadata: { contentType: "image/jpeg" },
       body: new ReadableStream<Uint8Array>({
         start(controller) {
@@ -305,7 +342,10 @@ describe("admin media adapter", () => {
     };
     const originals = {
       get: vi.fn(async (_key: string, options?: { onlyIf?: Headers }) => {
-        if (options?.onlyIf?.get("If-None-Match") === object.httpEtag) return object;
+        if (options?.onlyIf?.get("If-None-Match") === object.httpEtag) {
+          const { body: _body, ...metadata } = object;
+          return metadata;
+        }
         return object;
       }),
     };
@@ -331,10 +371,9 @@ describe("admin media adapter", () => {
     expect(response.headers.get("Content-Type")).toBe("image/jpeg");
     expect(response.headers.get("ETag")).toBe('"original-etag"');
     const disposition = response.headers.get("Content-Disposition");
-    expect(disposition).toContain("filename=");
-    expect(disposition).toContain("filename*=UTF-8''");
-    expect(disposition).not.toContain("\r");
-    expect(disposition).not.toContain("\n");
+    expect(disposition).toBe(
+      "inline; filename=\"_____X-Evil: 1.jpg\"; filename*=UTF-8''%E5%86%99%E7%9C%9F%22%0D%0AX-Evil%3A%201.jpg",
+    );
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
 
     const conditional = await app.request(
@@ -342,6 +381,7 @@ describe("admin media adapter", () => {
       {
         headers: {
           "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Match": '"original-etag"',
           "If-None-Match": '"original-etag"',
         },
       },
@@ -349,6 +389,180 @@ describe("admin media adapter", () => {
     );
     expect(conditional.status).toBe(304);
     expect((await conditional.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  it("returns an empty 412 when If-Match does not strongly match the original", async () => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(access, "If-Match");
+
+    const response = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Match": '"stale-etag"',
+          "If-None-Match": '"original-etag"',
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+
+    expect(response.status).toBe(412);
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
+    expect(response.headers.get("ETag")).toBe('"original-etag"');
+    expect(originals.get).toHaveBeenCalledWith(
+      `media/originals/${MEDIA_ID}/hash`,
+      expect.objectContaining({ onlyIf: expect.any(Headers) }),
+    );
+    const condition = originals.get.mock.calls[0]?.[1]?.onlyIf;
+    expect(condition?.get("If-Match")).toBeNull();
+    expect(condition?.get("If-None-Match")).toBe('"original-etag"');
+  });
+
+  it("returns an empty 412 for a stale If-Unmodified-Since precondition", async () => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(
+      access,
+      "If-Unmodified-Since",
+      new Date("2026-08-27T00:00:01.000Z"),
+    );
+
+    const response = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Unmodified-Since": "Thu, 27 Aug 2026 00:00:00 GMT",
+          "If-None-Match": '"original-etag"',
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+
+    expect(response.status).toBe(412);
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
+    const condition = originals.get.mock.calls[0]?.[1]?.onlyIf;
+    expect(condition?.get("If-Unmodified-Since")).toBeNull();
+  });
+
+  it("ignores If-Modified-Since and serves a nonmatching cache tag normally", async () => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(access, "If-Modified-Since");
+
+    const response = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-None-Match": '"other-etag"',
+          "If-Modified-Since": "Thu, 27 Aug 2026 00:00:00 GMT",
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(ORIGINAL_BYTES);
+    const condition = originals.get.mock.calls[0]?.[1]?.onlyIf;
+    expect(condition?.get("If-Modified-Since")).toBeNull();
+    expect(condition?.get("If-None-Match")).toBe('"other-etag"');
+  });
+
+  it("ignores an invalid If-Unmodified-Since date", async () => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(access, "If-Unmodified-Since");
+
+    const response = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Unmodified-Since": "not-a-date",
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(ORIGINAL_BYTES);
+    const condition = originals.get.mock.calls[0]?.[1]?.onlyIf;
+    expect(condition?.get("If-Unmodified-Since")).toBeNull();
+  });
+
+  it("compares If-Unmodified-Since at HTTP-date second precision", async () => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(
+      access,
+      undefined,
+      new Date("2026-08-27T00:00:00.999Z"),
+    );
+
+    const response = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Unmodified-Since": "Thu, 27 Aug 2026 00:00:00 GMT",
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(ORIGINAL_BYTES);
+  });
+
+  it("does not turn a metadata-only nonmatching cache result into an empty 200", async () => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(access, "If-None-Match");
+
+    const response = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-None-Match": '"other-etag"',
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      error: { code: "INTERNAL_ERROR", message: "Internal server error" },
+    });
+  });
+
+  it("uses strong If-Match comparison and accepts a wildcard for an existing original", async () => {
+    const access = await accessAssertion();
+    const { app, originals } = originalFixture(access, "If-Match");
+
+    const weak = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Match": 'W/"original-etag"',
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+    expect(weak.status).toBe(412);
+    expect((await weak.arrayBuffer()).byteLength).toBe(0);
+
+    const wildcard = await app.request(
+      `https://localhost/api/v1/admin/media/${MEDIA_ID}/original`,
+      {
+        headers: {
+          "Cf-Access-Jwt-Assertion": access.assertion,
+          "If-Match": "*",
+        },
+      },
+      { ...ADMIN_BINDINGS, MEDIA_ORIGINALS: originals },
+    );
+    expect(wildcard.status).toBe(200);
+    expect(new Uint8Array(await wildcard.arrayBuffer())).toEqual(ORIGINAL_BYTES);
   });
 
   it("routes list, item, alt update, and trash operations through the media application", async () => {

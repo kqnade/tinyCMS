@@ -582,7 +582,7 @@ function mediaContentDisposition(filename: string): string {
         : `%${byte.toString(16).padStart(2, "0").toUpperCase()}`;
     })
     .join("");
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+  return `inline; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 function weakEtagMatches(header: string | null, etag: string): boolean {
@@ -591,6 +591,23 @@ function weakEtagMatches(header: string | null, etag: string): boolean {
     .split(",")
     .map((value) => value.trim())
     .some((value) => value === "*" || value === etag || value === `W/${etag}`);
+}
+
+function strongEtagMatches(header: string | null, etag: string): boolean {
+  if (header === null) return false;
+  return header
+    .split(",")
+    .map((value) => value.trim())
+    .some((value) => value === "*" || value === etag);
+}
+
+function ifUnmodifiedSinceFailed(header: string | null, uploaded: Date): boolean {
+  if (header === null) return false;
+  const timestamp = Date.parse(header);
+  return (
+    Number.isFinite(timestamp) &&
+    Math.floor(uploaded.getTime() / 1000) > Math.floor(timestamp / 1000)
+  );
 }
 
 async function streamMediaOriginal(
@@ -602,7 +619,12 @@ async function streamMediaOriginal(
     throw new ApplicationError(ApplicationErrorCode.INTERNAL_ERROR, "Internal server error");
   }
   const request = context.req.raw;
-  const object = await bucket.get(descriptor.key, { onlyIf: request.headers });
+  const forwardedConditions = new Headers();
+  const ifNoneMatch = request.headers.get("If-None-Match");
+  if (ifNoneMatch !== null) {
+    forwardedConditions.set("If-None-Match", ifNoneMatch);
+  }
+  const object = await bucket.get(descriptor.key, { onlyIf: forwardedConditions });
   if (object === null) {
     return context.json(
       errorResponse(ErrorCode.NOT_FOUND, "Resource not found", context.get("requestId")),
@@ -616,9 +638,23 @@ async function streamMediaOriginal(
     "Content-Disposition": mediaContentDisposition(descriptor.filename),
     ETag: object.httpEtag,
   });
+  const ifMatch = request.headers.get("If-Match");
+  if (ifMatch !== null && !strongEtagMatches(ifMatch, object.httpEtag)) {
+    return new Response(null, { status: 412, headers });
+  }
+  if (
+    ifMatch === null &&
+    ifUnmodifiedSinceFailed(request.headers.get("If-Unmodified-Since"), object.uploaded)
+  ) {
+    return new Response(null, { status: 412, headers });
+  }
   const hasBody = "body" in object && object.body !== undefined;
-  if (!hasBody || weakEtagMatches(request.headers.get("If-None-Match"), object.httpEtag)) {
+  if (weakEtagMatches(ifNoneMatch, object.httpEtag)) {
     return new Response(null, { status: 304, headers });
+  }
+
+  if (!hasBody) {
+    throw new ApplicationError(ApplicationErrorCode.INTERNAL_ERROR, "Internal server error");
   }
 
   return new Response(object.body, { status: 200, headers });
