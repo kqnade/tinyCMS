@@ -191,6 +191,31 @@ describe("editorial API client", () => {
     });
   });
 
+  it("preserves MEDIA_WRITE_FAILED from a 500 media error envelope", async () => {
+    const fetcher = vi.fn<Fetcher>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "MEDIA_WRITE_FAILED",
+              message: "media write failed",
+              requestId: "media-write-failed",
+            },
+          }),
+          { status: 500 },
+        ),
+    );
+    const api = createEditorialApi({ fetcher });
+
+    await expect(api.getMedia(media.id)).rejects.toSatisfy((error: unknown) => {
+      return (
+        error instanceof EditorialApiError &&
+        error.status === 500 &&
+        error.code === "MEDIA_WRITE_FAILED"
+      );
+    });
+  });
+
   it("reads the bounded post list through the relative same-origin route", async () => {
     const fetcher = vi.fn<Fetcher>(async () => success({ items: [post], nextCursor: null }));
     const api = createEditorialApi({ fetcher });

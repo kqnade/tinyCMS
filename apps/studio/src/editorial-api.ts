@@ -111,12 +111,14 @@ export type EditorialApi = {
 
 export type EditorialApiErrorKind = "conflict" | "error";
 
+type EditorialApiErrorCode = ErrorCodeValue | "MEDIA_WRITE_FAILED";
+
 export class EditorialApiError extends Error {
-  readonly code: ErrorCodeValue | undefined;
+  readonly code: EditorialApiErrorCode | undefined;
   readonly kind: EditorialApiErrorKind;
   readonly status: number;
 
-  constructor(status: number, code?: ErrorCodeValue) {
+  constructor(status: number, code?: EditorialApiErrorCode) {
     super("Editorial API request failed");
     this.name = "EditorialApiError";
     this.kind = status === 409 && code === ErrorCode.CONFLICT ? "conflict" : "error";
@@ -136,8 +138,9 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function safeErrorCode(value: unknown): ErrorCodeValue | undefined {
+function safeErrorCode(value: unknown): EditorialApiErrorCode | undefined {
   if (
+    value === "MEDIA_WRITE_FAILED" ||
     value === ErrorCode.INVALID_REQUEST ||
     value === ErrorCode.AUTH_REQUIRED ||
     value === ErrorCode.AUTH_INVALID ||
