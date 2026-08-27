@@ -5,6 +5,7 @@ export const ErrorCode = {
   NOT_FOUND: "NOT_FOUND",
   CONFLICT: "CONFLICT",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+  MEDIA_WRITE_FAILED: "MEDIA_WRITE_FAILED",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -16,4 +17,5 @@ export const HTTP_STATUS_BY_ERROR_CODE = {
   [ErrorCode.NOT_FOUND]: 404,
   [ErrorCode.CONFLICT]: 409,
   [ErrorCode.INTERNAL_ERROR]: 500,
+  [ErrorCode.MEDIA_WRITE_FAILED]: 500,
 } as const satisfies Record<ErrorCodeValue, number>;

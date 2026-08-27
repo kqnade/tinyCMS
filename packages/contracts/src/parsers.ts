@@ -13,6 +13,12 @@ import {
   type UtcTimestamp,
   type UuidV7,
 } from "./editorial";
+import type {
+  DeleteMediaRequest,
+  MediaListQuery,
+  MediaRouteParams,
+  UpdateMediaRequest,
+} from "./media";
 
 export type ContractParseIssue = {
   readonly path: readonly (string | number)[];
@@ -30,6 +36,7 @@ const MAX_OBJECT_KEYS = 16;
 
 export const MAX_CURSOR_LENGTH = 2048 as const;
 export const MAX_LIST_LIMIT = 100 as const;
+export const MAX_ALT_TEXT_LENGTH = 1000 as const;
 export const MAX_SLUG_LENGTH = 128 as const;
 export const MAX_TITLE_LENGTH = 512 as const;
 export const MAX_EXCERPT_LENGTH = 2048 as const;
@@ -122,6 +129,108 @@ export function parsePostRouteParams(input: unknown): ContractParseResult<PostRo
   }
 
   return { ok: true, value: { postId: postId as UuidV7 } };
+}
+
+export function parseMediaRouteParams(input: unknown): ContractParseResult<MediaRouteParams> {
+  const inspection = inspectObject(input, ["mediaId"]);
+  if (!("record" in inspection)) {
+    return { ok: false, issues: inspection };
+  }
+
+  const issues = [...inspection.issues];
+  const mediaId = parseRequiredUuid(inspection, "mediaId", issues);
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return { ok: true, value: { mediaId: mediaId as UuidV7 } };
+}
+
+export function parseUpdateMediaRequest(input: unknown): ContractParseResult<UpdateMediaRequest> {
+  const inspection = inspectObject(input, ["expectedVersion", "altText"]);
+  if (!isObjectInspection(inspection)) {
+    return { ok: false, issues: inspection };
+  }
+
+  const issues = [...inspection.issues];
+  let expectedVersion: number | undefined;
+  let altText: string | undefined;
+
+  if (!inspection.keys.includes("expectedVersion")) {
+    issues.push(issue(["expectedVersion"], "missing_key", "Required property is missing."));
+  } else {
+    const read = readProperty(inspection.record, "expectedVersion");
+    if (!read.ok) {
+      issues.push(
+        issue(["expectedVersion"], "invalid_value", "Property could not be read safely."),
+      );
+    } else {
+      const parsed = parseExpectedMediaVersion(read.value);
+      if (!parsed.ok) {
+        appendIssues(issues, "expectedVersion", parsed.issues);
+      } else {
+        expectedVersion = parsed.value;
+      }
+    }
+  }
+
+  if (!inspection.keys.includes("altText")) {
+    issues.push(issue(["altText"], "missing_key", "Required property is missing."));
+  } else {
+    const read = readProperty(inspection.record, "altText");
+    if (!read.ok) {
+      issues.push(issue(["altText"], "invalid_value", "Property could not be read safely."));
+    } else {
+      const parsed = parseBoundedString(read.value, MAX_ALT_TEXT_LENGTH, "altText");
+      if (!parsed.ok) {
+        appendIssues(issues, "altText", parsed.issues);
+      } else {
+        altText = parsed.value;
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    value: { expectedVersion: expectedVersion as number, altText: altText as string },
+  };
+}
+
+export function parseDeleteMediaRequest(input: unknown): ContractParseResult<DeleteMediaRequest> {
+  const inspection = inspectObject(input, ["expectedVersion"]);
+  if (!isObjectInspection(inspection)) {
+    return { ok: false, issues: inspection };
+  }
+
+  const issues = [...inspection.issues];
+  let expectedVersion: number | undefined;
+  if (!inspection.keys.includes("expectedVersion")) {
+    issues.push(issue(["expectedVersion"], "missing_key", "Required property is missing."));
+  } else {
+    const read = readProperty(inspection.record, "expectedVersion");
+    if (!read.ok) {
+      issues.push(
+        issue(["expectedVersion"], "invalid_value", "Property could not be read safely."),
+      );
+    } else {
+      const parsed = parseExpectedMediaVersion(read.value);
+      if (!parsed.ok) {
+        appendIssues(issues, "expectedVersion", parsed.issues);
+      } else {
+        expectedVersion = parsed.value;
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return { ok: true, value: { expectedVersion: expectedVersion as number } };
 }
 
 export function parsePostRevisionRouteParams(
@@ -382,6 +491,10 @@ export function parseSavePostDraftRequest(
 }
 
 export function parsePostListQuery(input: unknown): ContractParseResult<PostListQuery> {
+  return parseListQuery(input);
+}
+
+export function parseMediaListQuery(input: unknown): ContractParseResult<MediaListQuery> {
   return parseListQuery(input);
 }
 
@@ -646,6 +759,19 @@ function parseExpectedDraftVersion(input: unknown): ContractParseResult<number> 
         "invalid_expected_draft_version",
         "Expected draft version must be a positive safe integer.",
       ),
+    ],
+  };
+}
+
+function parseExpectedMediaVersion(input: unknown): ContractParseResult<number> {
+  if (typeof input === "number" && Number.isSafeInteger(input) && input >= 1) {
+    return { ok: true, value: input };
+  }
+
+  return {
+    ok: false,
+    issues: [
+      issue([], "invalid_expected_version", "Expected version must be a positive safe integer."),
     ],
   };
 }

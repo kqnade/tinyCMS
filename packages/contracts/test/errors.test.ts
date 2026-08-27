@@ -10,6 +10,7 @@ describe("HTTP error contracts", () => {
       NOT_FOUND: "NOT_FOUND",
       CONFLICT: "CONFLICT",
       INTERNAL_ERROR: "INTERNAL_ERROR",
+      MEDIA_WRITE_FAILED: "MEDIA_WRITE_FAILED",
     });
 
     expect(HTTP_STATUS_BY_ERROR_CODE).toEqual({
@@ -19,6 +20,7 @@ describe("HTTP error contracts", () => {
       NOT_FOUND: 404,
       CONFLICT: 409,
       INTERNAL_ERROR: 500,
+      MEDIA_WRITE_FAILED: 500,
     });
   });
 });
