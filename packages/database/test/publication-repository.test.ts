@@ -162,4 +162,80 @@ describe("editorial repository publication preparation", () => {
     });
     expect(retry).toEqual(completed);
   });
+
+  it("keeps the active revision when publication fails", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d41201",
+        accessSubject: "subject-publication-failure",
+        displayName: "Publication Failure Author",
+        createdAt: 1_700_000_022_000,
+        updatedAt: 1_700_000_022_000,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d41202",
+        slug: "publication-failure",
+        createdAt: 1_700_000_022_001,
+        updatedAt: 1_700_000_022_001,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d41203",
+        version: 1,
+        title: "Currently published",
+        contentVersion: 1,
+        contentJson: '{"type":"doc","content":[]}',
+        createdAt: 1_700_000_022_002,
+      },
+    });
+    await env.TEST_DB.prepare(
+      "UPDATE posts SET status = 'published', active_published_revision_id = ? WHERE id = ?",
+    )
+      .bind(initial.revision.id, initial.post.id)
+      .run();
+    const draft = await repository.saveDraft({
+      postId: initial.post.id,
+      expectedDraftVersion: 1,
+      authorId: initial.author.id,
+      title: "Publication that fails",
+      contentVersion: 1,
+      contentJson: '{"type":"doc","content":[]}',
+      updatedAt: 1_700_000_022_003,
+    });
+    const prepared = await repository.preparePublication({
+      postId: initial.post.id,
+      expectedDraftVersion: draft.version,
+      expectedRevisionVersion: initial.revision.version,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d41204",
+      publicationJobId: "018f0e5d-6a25-7b01-8f4a-7d62a5d41205",
+      idempotencyKey: "publish-publication-failure-1",
+      authorId: initial.author.id,
+      createdAt: 1_700_000_022_004,
+    });
+    const request = {
+      publicationJobId: prepared.job.id,
+      postId: initial.post.id,
+      revisionId: prepared.revision.id,
+      errorMessage: "Failed to write Markdown artifact",
+      failedAt: 1_700_000_022_005,
+    };
+
+    const failed = await repository.failPublication(request);
+    const retry = await repository.failPublication(request);
+
+    expect(failed).toMatchObject({
+      id: prepared.job.id,
+      state: "failed",
+      attempts: 1,
+      errorMessage: request.errorMessage,
+      startedAt: request.failedAt,
+      completedAt: request.failedAt,
+      updatedAt: request.failedAt,
+    });
+    expect(retry).toEqual(failed);
+    await expect(repository.getPost(initial.post.id)).resolves.toMatchObject({
+      status: "published",
+      activePublishedRevisionId: initial.revision.id,
+    });
+  });
 });

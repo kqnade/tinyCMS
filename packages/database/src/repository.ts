@@ -103,6 +103,14 @@ export interface CompletePublicationInput {
   completedAt: number;
 }
 
+export interface FailPublicationInput {
+  publicationJobId: string;
+  postId: string;
+  revisionId: string;
+  errorMessage: string;
+  failedAt: number;
+}
+
 export interface AppendRevisionInput {
   postId: string;
   authorId: string;
@@ -189,6 +197,7 @@ export interface EditorialRepository {
   checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
   preparePublication(input: PreparePublicationInput): Promise<PreparedPublication>;
   completePublication(input: CompletePublicationInput): Promise<CompletedPublication>;
+  failPublication(input: FailPublicationInput): Promise<PublicationJob>;
   getAuthor(id: string): Promise<Author>;
   getAuthorByAccessSubject(accessSubject: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
@@ -771,6 +780,85 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       throw new RepositoryError(
         RepositoryErrorCode.WRITE_FAILED,
         "Failed to complete publication",
+        cause,
+      );
+    }
+  };
+
+  const failPublication = async ({
+    publicationJobId,
+    postId,
+    revisionId,
+    errorMessage,
+    failedAt,
+  }: FailPublicationInput): Promise<PublicationJob> => {
+    const readJob = async (): Promise<PublicationJob> => {
+      const job = await database
+        .prepare(
+          `SELECT id, idempotency_key AS "idempotencyKey", post_id AS "postId",
+             revision_id AS "revisionId", state, attempts, error_message AS "errorMessage",
+             available_at AS "availableAt", started_at AS "startedAt",
+             completed_at AS "completedAt", created_at AS "createdAt", updated_at AS "updatedAt"
+           FROM publication_jobs
+           WHERE id = ?`,
+        )
+        .bind(publicationJobId)
+        .first<PublicationJob>();
+      if (job === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "publication job was not found");
+      }
+      if (job.postId !== postId || job.revisionId !== revisionId) {
+        throw new RepositoryError(
+          RepositoryErrorCode.CONFLICT,
+          "Publication job does not match the requested revision",
+        );
+      }
+      return job;
+    };
+
+    try {
+      const current = await readJob();
+      if (current.state === "failed") {
+        return current;
+      }
+      if (current.state === "succeeded") {
+        throw new RepositoryError(
+          RepositoryErrorCode.CONFLICT,
+          "Completed publication cannot be marked as failed",
+        );
+      }
+
+      const failed = await database
+        .prepare(
+          `UPDATE publication_jobs
+           SET state = 'failed', attempts = attempts + 1,
+             started_at = COALESCE(started_at, ?), completed_at = ?,
+             error_message = ?, updated_at = ?
+           WHERE id = ? AND post_id = ? AND revision_id = ?
+             AND state IN ('pending', 'running')
+           RETURNING id, idempotency_key AS "idempotencyKey", post_id AS "postId",
+             revision_id AS "revisionId", state, attempts, error_message AS "errorMessage",
+             available_at AS "availableAt", started_at AS "startedAt",
+             completed_at AS "completedAt", created_at AS "createdAt", updated_at AS "updatedAt"`,
+        )
+        .bind(failedAt, failedAt, errorMessage, failedAt, publicationJobId, postId, revisionId)
+        .first<PublicationJob>();
+      if (failed !== null) {
+        return failed;
+      }
+
+      const retried = await readJob();
+      if (retried.state === "failed") {
+        return retried;
+      }
+      throw new RepositoryError(RepositoryErrorCode.CONFLICT, "Publication job is not fail-able");
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to record publication failure",
         cause,
       );
     }
@@ -1475,6 +1563,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     checkpointDraft,
     preparePublication,
     completePublication,
+    failPublication,
     getAuthor,
     getAuthorByAccessSubject,
     getPost,
