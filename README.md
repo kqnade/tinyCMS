@@ -36,6 +36,7 @@ mise run dev
 ```
 
 `mise run dev` applies pending migrations to the local Admin D1 database before starting the development servers.
+The Admin and Public Workers share that local D1 and R2 state, so published posts and media are immediately available on the public server.
 
 The development servers bind only to `127.0.0.1`. Check the Worker boundaries with:
 
