@@ -348,7 +348,8 @@ type MediaMultipartReadResult =
     }
   | { readonly ok: false; readonly message: string };
 
-const MAX_MULTIPART_BODY_BYTES = MAX_MEDIA_BYTES + 1_048_576;
+const MAX_MULTIPART_ENVELOPE_BYTES = 64 * 1024;
+const MAX_MULTIPART_BODY_BYTES = MAX_MEDIA_BYTES + MAX_MULTIPART_ENVELOPE_BYTES;
 
 function invalidRequest(context: AdminContext, details?: unknown): Response {
   return context.json(
@@ -394,15 +395,12 @@ async function readJsonBody(request: Request): Promise<JsonReadResult> {
 
 async function readMediaMultipart(request: Request): Promise<MediaMultipartReadResult> {
   const contentLength = request.headers.get("Content-Length");
-  if (contentLength !== null) {
-    const parsedLength = Number(contentLength);
-    if (
-      !Number.isSafeInteger(parsedLength) ||
-      parsedLength < 0 ||
-      parsedLength > MAX_MULTIPART_BODY_BYTES
-    ) {
-      return { ok: false, message: "Request body is too large" };
-    }
+  if (contentLength === null || !/^[0-9]+$/.test(contentLength)) {
+    return { ok: false, message: "Content-Length must be a decimal integer" };
+  }
+  const parsedLength = Number(contentLength);
+  if (!Number.isSafeInteger(parsedLength) || parsedLength > MAX_MULTIPART_BODY_BYTES) {
+    return { ok: false, message: "Request body is too large" };
   }
 
   let form: FormData;

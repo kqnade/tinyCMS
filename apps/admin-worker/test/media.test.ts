@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import {
   ApplicationError,
   ApplicationErrorCode,
+  MAX_MEDIA_BYTES,
   type MediaApplication,
 } from "@tinycms/application";
 import type { MediaAsset } from "@tinycms/contracts";
@@ -115,6 +116,36 @@ function mutationHeaders(assertion: string, contentType = "application/json") {
   };
 }
 
+async function serializeMultipart(form: FormData): Promise<{
+  body: ArrayBuffer;
+  headers: { "Content-Length": string; "Content-Type": string };
+}> {
+  const request = new Request("https://localhost", { method: "POST", body: form });
+  const body = await request.clone().arrayBuffer();
+  const contentType = request.headers.get("Content-Type");
+  if (contentType === null) {
+    throw new Error("Multipart content type was not generated");
+  }
+  return {
+    body,
+    headers: {
+      "Content-Length": String(body.byteLength),
+      "Content-Type": contentType,
+    },
+  };
+}
+
+async function multipartRequest(
+  url: string,
+  form: FormData,
+  headers: HeadersInit,
+): Promise<Request> {
+  const request = new Request(url, { method: "POST", headers, body: form });
+  const bodyLength = (await request.clone().arrayBuffer()).byteLength;
+  request.headers.set("Content-Length", String(bodyLength));
+  return request;
+}
+
 describe("admin media adapter", () => {
   it("provides isolated local R2 and Images bindings for media adapters", async () => {
     const key = `media-test/${crypto.randomUUID()}`;
@@ -145,20 +176,13 @@ describe("admin media adapter", () => {
       new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], "photo.jpg", { type: "image/jpeg" }),
     );
     body.append("altText", "A photo");
+    const request = await multipartRequest("https://localhost/api/v1/admin/media", body, {
+      "Cf-Access-Jwt-Assertion": access.assertion,
+      Origin: "https://localhost",
+      "X-TinyCMS-Request": "1",
+    });
 
-    const response = await app.request(
-      "https://localhost/api/v1/admin/media",
-      {
-        method: "POST",
-        headers: {
-          "Cf-Access-Jwt-Assertion": access.assertion,
-          Origin: "https://localhost",
-          "X-TinyCMS-Request": "1",
-        },
-        body,
-      },
-      ADMIN_BINDINGS,
-    );
+    const response = await app.fetch(request, ADMIN_BINDINGS);
 
     expect(response.status).toBe(201);
     expect(application.createMedia).toHaveBeenCalledWith(
@@ -171,20 +195,99 @@ describe("admin media adapter", () => {
       { subject: "media-test-subject" },
     );
 
-    const nonMediaMultipart = await app.request(
-      "https://localhost/api/v1/admin/posts",
-      {
+    const nonMediaRequest = await multipartRequest("https://localhost/api/v1/admin/posts", body, {
+      "Cf-Access-Jwt-Assertion": access.assertion,
+      Origin: "https://localhost",
+      "X-TinyCMS-Request": "1",
+    });
+    const nonMediaMultipart = await app.fetch(nonMediaRequest, ADMIN_BINDINGS);
+    expect(nonMediaMultipart.status).toBe(400);
+  });
+
+  it("rejects a media upload without Content-Length before reading its body", async () => {
+    const access = await accessAssertion();
+    const application = mediaApplication();
+    const app = createAdminApp({
+      mediaApplication: application,
+      fetch: async () => new Response(JSON.stringify({ keys: [access.publicKey] })),
+    });
+    const request = new Request("https://localhost/api/v1/admin/media", {
+      method: "POST",
+      headers: {
+        "Cf-Access-Jwt-Assertion": access.assertion,
+        "Content-Type": "multipart/form-data; boundary=boundary",
+        Origin: "https://localhost",
+        "X-TinyCMS-Request": "1",
+      },
+      body: "not-read",
+    });
+    const formData = vi.spyOn(request, "formData");
+
+    const response = await app.fetch(request, ADMIN_BINDINGS);
+
+    expect(response.status).toBe(400);
+    expect(formData).not.toHaveBeenCalled();
+    expect(request.bodyUsed).toBe(false);
+    expect(application.createMedia).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed or negative Content-Length before reading its body", async () => {
+    const access = await accessAssertion();
+    const application = mediaApplication();
+    const app = createAdminApp({
+      mediaApplication: application,
+      fetch: async () => new Response(JSON.stringify({ keys: [access.publicKey] })),
+    });
+
+    for (const contentLength of ["1e3", "1.0", "-1"]) {
+      const request = new Request("https://localhost/api/v1/admin/media", {
         method: "POST",
         headers: {
           "Cf-Access-Jwt-Assertion": access.assertion,
+          "Content-Type": "multipart/form-data; boundary=boundary",
+          "Content-Length": contentLength,
           Origin: "https://localhost",
           "X-TinyCMS-Request": "1",
         },
-        body,
+        body: "not-read",
+      });
+      const formData = vi.spyOn(request, "formData");
+
+      const response = await app.fetch(request, ADMIN_BINDINGS);
+
+      expect(response.status, contentLength).toBe(400);
+      expect(formData, contentLength).not.toHaveBeenCalled();
+      expect(request.bodyUsed, contentLength).toBe(false);
+    }
+    expect(application.createMedia).not.toHaveBeenCalled();
+  });
+
+  it("rejects an over-bound Content-Length before reading its body", async () => {
+    const access = await accessAssertion();
+    const application = mediaApplication();
+    const app = createAdminApp({
+      mediaApplication: application,
+      fetch: async () => new Response(JSON.stringify({ keys: [access.publicKey] })),
+    });
+    const request = new Request("https://localhost/api/v1/admin/media", {
+      method: "POST",
+      headers: {
+        "Cf-Access-Jwt-Assertion": access.assertion,
+        "Content-Type": "multipart/form-data; boundary=boundary",
+        "Content-Length": String(MAX_MEDIA_BYTES + 64 * 1024 + 1),
+        Origin: "https://localhost",
+        "X-TinyCMS-Request": "1",
       },
-      ADMIN_BINDINGS,
-    );
-    expect(nonMediaMultipart.status).toBe(400);
+      body: "not-read",
+    });
+    const formData = vi.spyOn(request, "formData");
+
+    const response = await app.fetch(request, ADMIN_BINDINGS);
+
+    expect(response.status).toBe(400);
+    expect(formData).not.toHaveBeenCalled();
+    expect(request.bodyUsed).toBe(false);
+    expect(application.createMedia).not.toHaveBeenCalled();
   });
 
   it("streams a private original with an exact ETag and supports conditional 304", async () => {
@@ -339,12 +442,16 @@ describe("admin media adapter", () => {
     for (const build of cases) {
       const form = new FormData();
       build(form);
+      const multipart = await serializeMultipart(form);
       const response = await app.request(
         "https://localhost/api/v1/admin/media",
         {
           method: "POST",
-          headers: mutationHeaders(access.assertion, "multipart/form-data"),
-          body: form,
+          headers: {
+            ...mutationHeaders(access.assertion, "multipart/form-data"),
+            ...multipart.headers,
+          },
+          body: multipart.body,
         },
         ADMIN_BINDINGS,
       );
@@ -365,15 +472,17 @@ describe("admin media adapter", () => {
     for (const boundary of cases) {
       const form = new FormData();
       form.append("file", new File(["one"], "one.jpg", { type: "image/jpeg" }));
+      const multipart = await serializeMultipart(form);
       const response = await app.request(
         "https://localhost/api/v1/admin/media",
         {
           method: "POST",
           headers: {
             "Cf-Access-Jwt-Assertion": access.assertion,
+            ...multipart.headers,
             ...boundary,
           },
-          body: form,
+          body: multipart.body,
         },
         ADMIN_BINDINGS,
       );
@@ -394,6 +503,7 @@ describe("admin media adapter", () => {
     const { access, app } = await authenticatedApp(application);
     const form = new FormData();
     form.append("file", new File(["one"], "one.jpg", { type: "image/jpeg" }));
+    const multipart = await serializeMultipart(form);
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
@@ -401,8 +511,11 @@ describe("admin media adapter", () => {
         "https://localhost/api/v1/admin/media",
         {
           method: "POST",
-          headers: mutationHeaders(access.assertion, "multipart/form-data"),
-          body: form,
+          headers: {
+            ...mutationHeaders(access.assertion, "multipart/form-data"),
+            ...multipart.headers,
+          },
+          body: multipart.body,
         },
         ADMIN_BINDINGS,
       );
@@ -463,25 +576,18 @@ describe("admin media adapter", () => {
     });
     const form = new FormData();
     form.append("file", new File([ONE_PIXEL_PNG], "one.png", { type: "image/png" }));
-    const response = await app.request(
-      "https://localhost/api/v1/admin/media",
-      {
-        method: "POST",
-        headers: {
-          "Cf-Access-Jwt-Assertion": access.assertion,
-          Origin: "https://localhost",
-          "X-TinyCMS-Request": "1",
-        },
-        body: form,
-      },
-      {
-        ...ADMIN_BINDINGS,
-        CMS_DB: env.CMS_DB,
-        MEDIA_ORIGINALS: env.MEDIA_ORIGINALS,
-        MEDIA_DERIVATIVES: env.MEDIA_DERIVATIVES,
-        IMAGES: env.IMAGES,
-      },
-    );
+    const request = await multipartRequest("https://localhost/api/v1/admin/media", form, {
+      "Cf-Access-Jwt-Assertion": access.assertion,
+      Origin: "https://localhost",
+      "X-TinyCMS-Request": "1",
+    });
+    const response = await app.fetch(request, {
+      ...ADMIN_BINDINGS,
+      CMS_DB: env.CMS_DB,
+      MEDIA_ORIGINALS: env.MEDIA_ORIGINALS,
+      MEDIA_DERIVATIVES: env.MEDIA_DERIVATIVES,
+      IMAGES: env.IMAGES,
+    });
 
     expect(response.status).toBe(201);
     const body = (await response.json()) as {
