@@ -25,6 +25,10 @@
   ],
   "r2_buckets": [
     {
+      "binding": "CONTENT_ARTIFACTS",
+      "bucket_name": "tinycms-content-artifacts-local"
+    },
+    {
       "binding": "MEDIA_ORIGINALS",
       "bucket_name": "tinycms-media-originals-local"
     },

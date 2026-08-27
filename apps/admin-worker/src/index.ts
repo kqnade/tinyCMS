@@ -14,6 +14,7 @@ import {
   ADMIN_MEDIA_ROUTE,
   ADMIN_POST_DRAFT_ROUTE,
   ADMIN_POST_PREVIEW_ROUTE,
+  ADMIN_POST_PUBLISH_ROUTE,
   ADMIN_POST_REVISION_RESTORE_ROUTE,
   ADMIN_POST_REVISIONS_ROUTE,
   ADMIN_POST_ROUTE,
@@ -32,6 +33,7 @@ import {
   parsePostRevisionRouteParams,
   parsePostRouteParams,
   parsePreviewPostRequest,
+  parsePublishPostRequest,
   parseRestorePostRevisionRequest,
   parseSavePostDraftRequest,
   parseUpdateMediaRequest,
@@ -56,6 +58,7 @@ type AdminWorker = {
     ACCESS_TEAM_DOMAIN?: string;
     ACCESS_AUD?: string;
     CMS_DB: D1Database;
+    CONTENT_ARTIFACTS?: R2Bucket;
     MEDIA_ORIGINALS?: R2Bucket;
     MEDIA_DERIVATIVES?: R2Bucket;
     IMAGES?: ImagesBinding;
@@ -488,6 +491,23 @@ function createMediaObjectStore(bucket: R2Bucket) {
   };
 }
 
+function createPublicationArtifactStore(bucket: R2Bucket) {
+  return {
+    put: async (
+      key: string,
+      value: string,
+      options: { readonly contentType: string; readonly cacheControl: string },
+    ): Promise<void> => {
+      await bucket.put(key, value, {
+        httpMetadata: {
+          contentType: options.contentType,
+          cacheControl: options.cacheControl,
+        },
+      });
+    },
+  };
+}
+
 function createMediaInspector(images: ImagesBinding) {
   return async (bytes: Uint8Array) => {
     const result = await images.info(mediaByteStream(bytes));
@@ -891,6 +911,9 @@ export function createAdminApp(dependencies: AccessDependencies = {}) {
     }
     return createEditorialApplication({
       repository: createEditorialRepository(context.env.CMS_DB),
+      ...(context.env.CONTENT_ARTIFACTS === undefined
+        ? {}
+        : { artifactStore: createPublicationArtifactStore(context.env.CONTENT_ARTIFACTS) }),
       ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
       ...(dependencies.uuidv7 === undefined ? {} : { uuidv7: dependencies.uuidv7 }),
     });
@@ -1048,6 +1071,27 @@ export function createAdminApp(dependencies: AccessDependencies = {}) {
     const request = requestParams(context, parsed);
     if (request instanceof Response) return request;
     return applicationResponse(context, resolveApplication(context).previewPost(request));
+  });
+
+  application.post(ADMIN_POST_PUBLISH_ROUTE, async (context) => {
+    const params = requestParams(
+      context,
+      parsePostRouteParams({ postId: context.req.param("postId") }),
+    );
+    if (params instanceof Response) return params;
+    const body = await readJsonBody(context.req.raw);
+    if (!body.ok) return invalidRequest(context, [{ code: "invalid_body", message: body.message }]);
+    const parsed = parsePublishPostRequest(body.value);
+    const request = requestParams(context, parsed);
+    if (request instanceof Response) return request;
+    return applicationResponse(
+      context,
+      resolveApplication(context).publishPost(
+        params.postId,
+        request,
+        context.get("accessIdentity"),
+      ),
+    );
   });
 
   application.put(ADMIN_POST_DRAFT_ROUTE, async (context) => {

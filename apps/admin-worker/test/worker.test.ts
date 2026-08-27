@@ -128,6 +128,61 @@ describe("admin worker", () => {
     expect(previewPost).toHaveBeenCalledWith(request);
   });
 
+  it("publishes a post through the authenticated JSON write boundary", async () => {
+    const key = await createSigningKey("publish-route-key");
+    const postId = "0192f5a4-7b3c-7d1e-8f20-123456789abc";
+    const publishPost = vi.fn<EditorialApplication["publishPost"]>(
+      async () =>
+        ({
+          publicationJobId: "0192f5a4-7b3c-7d1e-8f20-123456789abd",
+          htmlPath: `posts/${postId}/revisions/0192f5a4-7b3c-7d1e-8f20-123456789abe.html`,
+          markdownPath: `posts/${postId}/revisions/0192f5a4-7b3c-7d1e-8f20-123456789abe.md`,
+        }) as never,
+    );
+    const application = createAdminApp({
+      application: { publishPost } as unknown as EditorialApplication,
+      now: () => NOW,
+      fetch: async () => new Response(JSON.stringify({ keys: [key.publicKey] }), { status: 200 }),
+    });
+    const assertion = await key.sign({
+      iss: ACCESS_ISSUER,
+      aud: ACCESS_AUDIENCE,
+      exp: NOW / 1000 + 300,
+    });
+    const request = {
+      expectedDraftVersion: 3,
+      expectedRevisionVersion: 5,
+      idempotencyKey: "studio-publish-request-1",
+    };
+
+    const response = await application.request(
+      `https://localhost/api/v1/admin/posts/${postId}/publish`,
+      {
+        method: "POST",
+        headers: {
+          "Cf-Access-Jwt-Assertion": assertion,
+          "Content-Type": "application/json",
+          Origin: "https://localhost",
+          "X-TinyCMS-Request": "1",
+        },
+        body: JSON.stringify(request),
+      },
+      ACCESS_BINDINGS,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        publicationJobId: "0192f5a4-7b3c-7d1e-8f20-123456789abd",
+      },
+    });
+    expect(publishPost).toHaveBeenCalledWith(
+      postId,
+      request,
+      expect.objectContaining({ subject: "test-access-subject" }),
+    );
+  });
+
   it("requires an Access assertion on the configured host", async () => {
     const response = await exports.default.fetch("https://localhost/healthz");
     const requestId = response.headers.get("X-Request-Id");
