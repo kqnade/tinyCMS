@@ -1,8 +1,9 @@
+import { MAX_ALT_TEXT_LENGTH } from "@tinycms/contracts";
 import { ApplicationError, ApplicationErrorCode } from "./errors";
 
 export const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 export const MAX_MEDIA_FILENAME_LENGTH = 255;
-export const MAX_MEDIA_ALT_TEXT_LENGTH = 1000;
+export const MAX_MEDIA_ALT_TEXT_LENGTH = MAX_ALT_TEXT_LENGTH;
 export const MAX_MEDIA_DIMENSION = 12_000;
 
 export type MediaMimeType = "image/jpeg" | "image/png" | "image/webp";
