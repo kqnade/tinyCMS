@@ -9,12 +9,49 @@ import {
   MAX_TITLE_LENGTH,
   parseCheckpointPostRevisionRequest,
   parseCreatePostRequest,
+  parsePublishPostRequest,
   parsePreviewPostRequest,
   parseRestorePostRevisionRequest,
   parseSavePostDraftRequest,
 } from "../src/index";
 
 describe("editor mutation body parsers", () => {
+  it("parses an exact publish request with concurrency and idempotency fields", () => {
+    expect(
+      parsePublishPostRequest({
+        expectedDraftVersion: 3,
+        expectedRevisionVersion: 2,
+        idempotencyKey: "publish-0192f5a4-7b3c-7d1e-8f20-123456789abc-3",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        expectedDraftVersion: 3,
+        expectedRevisionVersion: 2,
+        idempotencyKey: "publish-0192f5a4-7b3c-7d1e-8f20-123456789abc-3",
+      },
+    });
+
+    for (const input of [
+      { expectedDraftVersion: 3, expectedRevisionVersion: 2 },
+      { expectedDraftVersion: 3, expectedRevisionVersion: 2, idempotencyKey: "" },
+      { expectedDraftVersion: 3, expectedRevisionVersion: 2, idempotencyKey: "publish key" },
+      {
+        expectedDraftVersion: 3,
+        expectedRevisionVersion: 2,
+        idempotencyKey: "p".repeat(129),
+      },
+      {
+        expectedDraftVersion: 3,
+        expectedRevisionVersion: 2,
+        idempotencyKey: "publish-3",
+        extra: true,
+      },
+    ]) {
+      expect(parsePublishPostRequest(input)).toMatchObject({ ok: false });
+    }
+  });
+
   it("parses a complete preview request without a concurrency field", () => {
     const content = { type: "doc", content: [] };
     const metadata = { seo: { description: "A preview" } };

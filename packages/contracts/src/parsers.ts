@@ -9,6 +9,7 @@ import {
   type PostRevisionRouteParams,
   type PostRouteParams,
   type PreviewPostRequest,
+  type PublishPostRequest,
   type RestorePostRevisionRequest,
   type SavePostDraftRequest,
   type UtcTimestamp,
@@ -40,6 +41,7 @@ export const MAX_LIST_LIMIT = 100 as const;
 export const MAX_ALT_TEXT_LENGTH = 1000 as const;
 export const MAX_SLUG_LENGTH = 128 as const;
 export const MAX_TITLE_LENGTH = 512 as const;
+export const MAX_IDEMPOTENCY_KEY_LENGTH = 128 as const;
 export const MAX_EXCERPT_LENGTH = 2048 as const;
 export const MAX_METADATA_DEPTH = 16 as const;
 export const MAX_METADATA_PROPERTIES = 1000 as const;
@@ -56,6 +58,11 @@ const SAVE_POST_DRAFT_KEYS = [
   "metadata",
 ] as const;
 const PREVIEW_POST_KEYS = ["title", "excerpt", "contentVersion", "content", "metadata"] as const;
+const PUBLISH_POST_KEYS = [
+  "expectedDraftVersion",
+  "expectedRevisionVersion",
+  "idempotencyKey",
+] as const;
 const EXPECTED_CONCURRENCY_VERSION_KEYS = [
   "expectedDraftVersion",
   "expectedRevisionVersion",
@@ -356,6 +363,98 @@ export function parseRestorePostRevisionRequest(
   input: unknown,
 ): ContractParseResult<RestorePostRevisionRequest> {
   return parseExpectedConcurrencyVersionRequest<RestorePostRevisionRequest>(input);
+}
+
+export function parsePublishPostRequest(input: unknown): ContractParseResult<PublishPostRequest> {
+  const inspection = inspectObject(input, PUBLISH_POST_KEYS);
+  if (!isObjectInspection(inspection)) {
+    return { ok: false, issues: inspection };
+  }
+
+  const issues = [...inspection.issues];
+  let expectedDraftVersion: number | undefined;
+  let expectedRevisionVersion: number | undefined;
+  let idempotencyKey: string | undefined;
+
+  if (!inspection.keys.includes("expectedDraftVersion")) {
+    issues.push(issue(["expectedDraftVersion"], "missing_key", "Required property is missing."));
+  } else {
+    const read = readProperty(inspection.record, "expectedDraftVersion");
+    if (!read.ok) {
+      issues.push(
+        issue(["expectedDraftVersion"], "invalid_value", "Property could not be read safely."),
+      );
+    } else {
+      const parsed = parseExpectedDraftVersion(read.value);
+      if (!parsed.ok) {
+        appendIssues(issues, "expectedDraftVersion", parsed.issues);
+      } else {
+        expectedDraftVersion = parsed.value;
+      }
+    }
+  }
+
+  if (!inspection.keys.includes("expectedRevisionVersion")) {
+    issues.push(issue(["expectedRevisionVersion"], "missing_key", "Required property is missing."));
+  } else {
+    const read = readProperty(inspection.record, "expectedRevisionVersion");
+    if (!read.ok) {
+      issues.push(
+        issue(["expectedRevisionVersion"], "invalid_value", "Property could not be read safely."),
+      );
+    } else if (
+      typeof read.value !== "number" ||
+      !Number.isSafeInteger(read.value) ||
+      read.value < 1
+    ) {
+      issues.push(
+        issue(
+          ["expectedRevisionVersion"],
+          "invalid_expected_revision_version",
+          "Expected revision version must be a positive safe integer.",
+        ),
+      );
+    } else {
+      expectedRevisionVersion = read.value;
+    }
+  }
+
+  if (!inspection.keys.includes("idempotencyKey")) {
+    issues.push(issue(["idempotencyKey"], "missing_key", "Required property is missing."));
+  } else {
+    const read = readProperty(inspection.record, "idempotencyKey");
+    if (!read.ok) {
+      issues.push(issue(["idempotencyKey"], "invalid_value", "Property could not be read safely."));
+    } else if (
+      typeof read.value !== "string" ||
+      read.value.length === 0 ||
+      !hasAtMostCodePoints(read.value, MAX_IDEMPOTENCY_KEY_LENGTH) ||
+      !/^[A-Za-z0-9._:-]+$/.test(read.value)
+    ) {
+      issues.push(
+        issue(
+          ["idempotencyKey"],
+          "invalid_idempotency_key",
+          `Idempotency key must be 1 to ${MAX_IDEMPOTENCY_KEY_LENGTH} ASCII token characters.`,
+        ),
+      );
+    } else {
+      idempotencyKey = read.value;
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    value: {
+      expectedDraftVersion: expectedDraftVersion as number,
+      expectedRevisionVersion: expectedRevisionVersion as number,
+      idempotencyKey: idempotencyKey as string,
+    },
+  };
 }
 
 export function parseSavePostDraftRequest(

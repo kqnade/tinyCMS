@@ -118,6 +118,12 @@ export type PreviewPostRequest = {
   metadata?: JsonObject;
 } & EditorContentDto;
 
+export type PublishPostRequest = {
+  expectedDraftVersion: number;
+  expectedRevisionVersion: number;
+  idempotencyKey: string;
+};
+
 export type CheckpointPostRevisionRequest = {
   expectedDraftVersion: number;
   expectedRevisionVersion: number;
@@ -146,6 +152,14 @@ export type PreviewPostResultDto = {
 };
 
 export type PreviewPostResponse = SuccessResponse<PreviewPostResultDto>;
+
+export type PublishPostResultDto = PostRevisionWriteResultDto & {
+  publicationJobId: UuidV7;
+  htmlPath: string;
+  markdownPath: string;
+};
+
+export type PublishPostResponse = SuccessResponse<PublishPostResultDto>;
 
 export type CheckpointPostRevisionResponse = SuccessResponse<PostRevisionWriteResultDto>;
 
