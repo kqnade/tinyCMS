@@ -155,4 +155,13 @@ describe("Studio styles", () => {
     expect(styles).toContain("line-height: var(--line-height-normal)");
     expect(styles).toContain("font-weight: var(--font-weight-semibold)");
   });
+
+  it("keeps media controls compact while preserving picker accessibility", () => {
+    expect(styles).toContain(".studio-media-actions");
+    expect(styles).toContain(".studio-media-file-input");
+    expect(styles).toContain(".studio-media-selection");
+    expect(styles).toContain(".studio-media-selection__actions");
+    expect(styles).toMatch(/\.studio-media-file-input\s*\{[\s\S]*clip:\s*rect\(/);
+    expect(styles).toMatch(/\.studio-media-selection__actions\s*\{[\s\S]*display:\s*flex/);
+  });
 });

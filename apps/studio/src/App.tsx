@@ -16,9 +16,10 @@ import {
   type DraftSnapshot,
   useDraftSession,
 } from "./draft-session";
-import { StudioEditor } from "./editor";
+import { StudioEditor, type StudioEditorHandle } from "./editor";
 import { createEmptyEditorContent, parseEditorContent } from "./editor-content";
 import { type EditorialApi, isEditorialConflict } from "./editorial-api";
+import { MediaPanel } from "./media-panel";
 import { Button } from "./ui";
 
 type IconName =
@@ -41,7 +42,7 @@ export type AppProps = DraftSessionOptions & {
 
 type WorkspaceState = "error" | "idle" | "loading" | "ready";
 type WorkspaceAction = "checkpoint" | "create" | "load" | "reload" | "restore" | "retry";
-type Panel = "history" | "posts";
+type Panel = "history" | "media" | "posts";
 
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, ReactNode> = {
@@ -225,6 +226,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
   const startedApiRef = useRef<EditorialApi | null>(null);
   const historyLoadedForRef = useRef<string | null>(null);
   const historyGenerationRef = useRef(0);
+  const editorRef = useRef<StudioEditorHandle | null>(null);
 
   selectedPostIdRef.current = selectedPostId;
 
@@ -352,6 +354,19 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
       if (startedApiRef.current === api) startedApiRef.current = null;
     };
   }, [api, loadWorkspace]);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setPanelOpen(false);
+    };
+
+    window.addEventListener("keydown", closeFromEscape);
+    return () => window.removeEventListener("keydown", closeFromEscape);
+  }, [panelOpen]);
 
   const retryWorkspace = useCallback(async () => {
     if (api === undefined || workspaceAction !== null) return;
@@ -609,7 +624,22 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
           >
             <Icon name="history" />
           </Button>
-          <Button aria-label="Media" className="studio-icon-button" disabled variant="ghost">
+          <Button
+            aria-label="Media"
+            aria-pressed={panelOpen && activePanel === "media"}
+            className="studio-icon-button"
+            disabled={api === undefined}
+            onClick={() => {
+              if (panelOpen && activePanel === "media") {
+                setPanelOpen(false);
+                return;
+              }
+              setActivePanel("media");
+              setPanelOpen(true);
+            }}
+            title="Media"
+            variant="ghost"
+          >
             <Icon name="image" />
           </Button>
           <Button aria-label="AI assist" className="studio-icon-button" disabled variant="ghost">
@@ -689,6 +719,12 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             </div>
           </section>
         ) : null}
+
+        {api !== undefined && activePanel === "media" ? (
+          <section aria-label="Media" className="studio-side-panel__content">
+            <MediaPanel api={api} editorDisabled={editorBusy} editorRef={editorRef} />
+          </section>
+        ) : null}
       </aside>
 
       <main className="studio-main">
@@ -708,6 +744,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             initialContent={session.content}
             key={`${selectedPostId ?? "empty"}-${editorVersion}`}
             onChange={session.setContent}
+            ref={editorRef}
           />
           <div
             className={`studio-workspace-indicator studio-workspace-indicator--${workspaceState}`}

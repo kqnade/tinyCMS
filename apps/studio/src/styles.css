@@ -490,6 +490,136 @@ input[readonly] {
   gap: var(--space-1);
 }
 
+.studio-media-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.studio-media-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.studio-media-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.studio-media-file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-media-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.studio-media-card {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: start;
+}
+
+.studio-media-card:hover,
+.studio-media-card[aria-pressed="true"] {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+
+.studio-media-card__thumbnail {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  object-fit: cover;
+}
+
+.studio-media-card__details {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: var(--space-1);
+}
+
+.studio-media-card__filename,
+.studio-media-card__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-media-card__meta,
+.studio-media-status {
+  color: var(--muted-foreground);
+  font-size: var(--font-size-xs);
+}
+
+.studio-media-status {
+  margin: 0;
+}
+
+.studio-media-status--error {
+  color: var(--danger);
+}
+
+.studio-media-load-more {
+  width: 100%;
+  min-height: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.studio-media-load-more:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.studio-media-load-more:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.studio-media-selection {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.studio-media-selection__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .studio-workspace-indicator {
   display: flex;
   min-height: 2.25rem;
