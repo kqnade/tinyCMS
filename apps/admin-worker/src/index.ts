@@ -57,6 +57,7 @@ type AdminWorker = {
     ADMIN_HOST: string;
     ACCESS_TEAM_DOMAIN?: string;
     ACCESS_AUD?: string;
+    LOCAL_DEV_AUTH?: string;
     CMS_DB: D1Database;
     CONTENT_ARTIFACTS?: R2Bucket;
     MEDIA_ORIGINALS?: R2Bucket;
@@ -857,6 +858,19 @@ export function createAdminApp(dependencies: AccessDependencies = {}) {
   });
 
   application.use("*", async (context, next) => {
+    const requestHost = new URL(context.req.url).hostname.toLowerCase();
+    if (
+      context.env.LOCAL_DEV_AUTH === "1" &&
+      context.env.ADMIN_HOST === "localhost" &&
+      requestHost === "localhost"
+    ) {
+      context.set("accessIdentity", {
+        subject: "local-development",
+        displayName: "Local development",
+      });
+      return next();
+    }
+
     const assertion = context.req.header("Cf-Access-Jwt-Assertion");
     if (!assertion) {
       return context.json(

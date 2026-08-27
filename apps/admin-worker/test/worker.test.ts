@@ -197,6 +197,28 @@ describe("admin worker", () => {
     });
   });
 
+  it("allows an unauthenticated request in explicit localhost development mode", async () => {
+    const response = await app.request("http://localhost/healthz", undefined, {
+      ADMIN_HOST: "localhost",
+      LOCAL_DEV_AUTH: "1",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { status: "ok" } });
+  });
+
+  it("keeps Access authentication enabled outside localhost development", async () => {
+    const response = await app.request("https://admin.example.com/healthz", undefined, {
+      ADMIN_HOST: "admin.example.com",
+      LOCAL_DEV_AUTH: "1",
+    });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({
+      error: { code: "AUTH_REQUIRED" },
+    });
+  });
+
   it("rejects a malformed Access assertion", async () => {
     const { jwksFetchCount, response } = await requestRejectedBeforeJwks("not-a-jwt");
 
