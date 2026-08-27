@@ -1,3 +1,4 @@
+import { MAX_ALT_TEXT_LENGTH } from "@tinycms/contracts";
 import { type ChangeEvent, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { StudioEditorHandle } from "./editor";
 import { type EditorialApi, isEditorialConflict, type MediaAsset } from "./editorial-api";
@@ -45,6 +46,11 @@ function uploadErrorFor(file: File): string | null {
   return null;
 }
 
+function altTextErrorFor(value: string): string | null {
+  if ([...value].length <= MAX_ALT_TEXT_LENGTH) return null;
+  return `Alt text must be at most ${MAX_ALT_TEXT_LENGTH} Unicode code points.`;
+}
+
 export function MediaPanel({ api, editorDisabled = false, editorRef }: MediaPanelProps) {
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
@@ -70,6 +76,10 @@ export function MediaPanel({ api, editorDisabled = false, editorRef }: MediaPane
   const selectedAsset = assets.find((asset) => asset.id === selectedMediaId) ?? null;
   const selectedAlt =
     selectedAsset === null ? "" : (altDrafts[selectedAsset.id] ?? selectedAsset.altText);
+  const selectedAltError = altTextErrorFor(selectedAlt);
+  const selectedAltIsValid = selectedAltError === null;
+  const selectedAltIsSaved =
+    selectedAsset === null || (selectedAltIsValid && selectedAlt === selectedAsset.altText);
 
   const loadMedia = useCallback(
     async (cursor?: string) => {
@@ -163,6 +173,11 @@ export function MediaPanel({ api, editorDisabled = false, editorRef }: MediaPane
 
   const saveAlt = useCallback(
     async (nextAlt: string) => {
+      const validationError = altTextErrorFor(nextAlt);
+      if (validationError !== null) {
+        setAltError(validationError);
+        return;
+      }
       if (selectedAsset === null || altRef.current || nextAlt === selectedAsset.altText) return;
       altRef.current = true;
       setAltState("loading");
@@ -213,6 +228,8 @@ export function MediaPanel({ api, editorDisabled = false, editorRef }: MediaPane
   const insertAsset = useCallback(() => {
     if (
       selectedAsset === null ||
+      !selectedAltIsValid ||
+      !selectedAltIsSaved ||
       editorDisabled ||
       insertRef.current ||
       editorRef.current === null
@@ -223,7 +240,7 @@ export function MediaPanel({ api, editorDisabled = false, editorRef }: MediaPane
     setInsertState("loading");
     try {
       editorRef.current.insertImage({
-        alt: selectedAsset.altText,
+        alt: selectedAlt,
         caption: null,
         mediaId: selectedAsset.id,
       });
@@ -233,11 +250,17 @@ export function MediaPanel({ api, editorDisabled = false, editorRef }: MediaPane
         setInsertState("idle");
       });
     }
-  }, [editorDisabled, editorRef, selectedAsset]);
+  }, [
+    editorDisabled,
+    editorRef,
+    selectedAlt,
+    selectedAltIsSaved,
+    selectedAltIsValid,
+    selectedAsset,
+  ]);
 
   const mediaBusy =
     uploadState === "loading" || altState === "loading" || deleteState === "loading";
-  const selectedAltIsSaved = selectedAsset === null || selectedAlt === selectedAsset.altText;
 
   return (
     <div className="studio-media-panel">
@@ -339,21 +362,23 @@ export function MediaPanel({ api, editorDisabled = false, editorRef }: MediaPane
       ) : null}
       {selectedAsset !== null ? (
         <div className="studio-media-selection">
-          <Field error={altError} id="studio-media-alt" label="Alt text">
+          <Field error={selectedAltError ?? altError} id="studio-media-alt" label="Alt text">
             <Input
               aria-label="Alt text"
               disabled={mediaBusy}
               onBlur={(event) => void saveAlt(event.currentTarget.value)}
-              onChange={(event) =>
-                setAltDrafts((current) => ({ ...current, [selectedAsset.id]: event.target.value }))
-              }
+              onChange={(event) => {
+                const nextAlt = event.target.value;
+                setAltDrafts((current) => ({ ...current, [selectedAsset.id]: nextAlt }));
+                setAltError(null);
+              }}
               value={selectedAlt}
             />
           </Field>
           <div className="studio-media-selection__actions">
             <Button
               aria-label="Save alt text"
-              disabled={mediaBusy || selectedAltIsSaved}
+              disabled={mediaBusy || !selectedAltIsValid || selectedAltIsSaved}
               loading={altState === "loading"}
               onClick={() => void saveAlt(selectedAlt)}
               variant="secondary"

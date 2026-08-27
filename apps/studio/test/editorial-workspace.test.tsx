@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import {
   ErrorCode,
+  MAX_ALT_TEXT_LENGTH,
   type PostDto,
   type PostListItemDto,
   type PostRevisionDto,
@@ -449,6 +450,170 @@ describe("Studio editorial workspace", () => {
       }),
     );
     expect(alt.value).toBe("");
+  });
+
+  it("rejects over-limit alt text without saving or inserting", async () => {
+    const updateMedia = vi.fn<EditorialApi["updateMedia"]>(async () => firstMedia);
+    const api = createMockApi({ updateMedia });
+    installJsdomGeometry();
+    render(<App api={api} autosaveDelay={60_000} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+
+    await openStudioMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Media" }));
+    await waitFor(() => expect(api.listMedia).toHaveBeenCalledWith({ limit: 20 }));
+    fireEvent.click(screen.getByRole("button", { name: "Select media hero.jpg" }));
+
+    const overLimit = `${"🙂".repeat(MAX_ALT_TEXT_LENGTH)}x`;
+    const alt = screen.getByRole("textbox", { name: "Alt text" }) as HTMLInputElement;
+    fireEvent.change(alt, { target: { value: overLimit } });
+
+    expect(alt.value).toBe(overLimit);
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Alt text");
+    expect(alt.getAttribute("aria-invalid")).toBe("true");
+    expect(alt.getAttribute("aria-describedby")).toContain(alert.id);
+    expect(
+      (screen.getByRole("button", { name: "Save alt text" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Insert image" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.blur(alt);
+    fireEvent.click(screen.getByRole("button", { name: "Insert image" }));
+    expect(updateMedia).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Body" }).querySelector("figure")).toBeNull();
+  });
+
+  it("accepts exactly the Unicode code point alt text limit", async () => {
+    const saved = { ...firstMedia, altText: "🙂".repeat(MAX_ALT_TEXT_LENGTH), version: 2 };
+    const updateMedia = vi.fn<EditorialApi["updateMedia"]>(async () => saved);
+    const api = createMockApi({ updateMedia });
+    render(<App api={api} autosaveDelay={60_000} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+
+    await openStudioMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Media" }));
+    await waitFor(() => expect(api.listMedia).toHaveBeenCalledWith({ limit: 20 }));
+    fireEvent.click(screen.getByRole("button", { name: "Select media hero.jpg" }));
+
+    const atLimit = "🙂".repeat(MAX_ALT_TEXT_LENGTH);
+    const alt = screen.getByRole("textbox", { name: "Alt text" }) as HTMLInputElement;
+    fireEvent.change(alt, { target: { value: atLimit } });
+
+    expect(alt.value).toBe(atLimit);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Save alt text" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Save alt text" }));
+    await waitFor(() =>
+      expect(updateMedia).toHaveBeenCalledWith(firstMedia.id, {
+        expectedVersion: 1,
+        altText: atLimit,
+      }),
+    );
+  });
+
+  it("recovers from an over-limit draft before saving and inserting", async () => {
+    const recoveredAlt = "Recovered alt";
+    const saved = { ...firstMedia, altText: recoveredAlt, version: 2 };
+    const updateMedia = vi.fn<EditorialApi["updateMedia"]>(async () => saved);
+    const api = createMockApi({ updateMedia });
+    installJsdomGeometry();
+    render(<App api={api} autosaveDelay={60_000} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+
+    await openStudioMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Media" }));
+    await waitFor(() => expect(api.listMedia).toHaveBeenCalledWith({ limit: 20 }));
+    fireEvent.click(screen.getByRole("button", { name: "Select media hero.jpg" }));
+
+    const alt = screen.getByRole("textbox", { name: "Alt text" }) as HTMLInputElement;
+    fireEvent.change(alt, { target: { value: `${"🙂".repeat(MAX_ALT_TEXT_LENGTH)}x` } });
+    expect(screen.getByRole("alert").textContent).toContain("code points");
+    expect(
+      (screen.getByRole("button", { name: "Save alt text" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Insert image" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.change(alt, { target: { value: recoveredAlt } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(alt.getAttribute("aria-invalid")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Save alt text" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByRole("button", { name: "Insert image" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save alt text" }));
+    await waitFor(() =>
+      expect(updateMedia).toHaveBeenCalledWith(firstMedia.id, {
+        expectedVersion: 1,
+        altText: recoveredAlt,
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Insert image" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Insert image" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "Body" }).querySelector("img")?.getAttribute("alt"),
+      ).toBe(recoveredAlt),
+    );
+  });
+
+  it("retains and revalidates drafts per selected media asset", async () => {
+    const secondMedia = mediaAsset(
+      "018f0e5d-6a25-7b01-8f4a-7d62a5d3e415",
+      "detail.png",
+      "Detail image",
+    );
+    const listMedia = vi.fn<EditorialApi["listMedia"]>(async () => ({
+      items: [firstMedia, secondMedia],
+      nextCursor: null,
+    }));
+    const api = createMockApi({ listMedia });
+    render(<App api={api} autosaveDelay={60_000} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+
+    await openStudioMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Media" }));
+    await waitFor(() => expect(listMedia).toHaveBeenCalledWith({ limit: 20 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Select media hero.jpg" }));
+    const alt = screen.getByRole("textbox", { name: "Alt text" }) as HTMLInputElement;
+    const overLimit = `${"🙂".repeat(MAX_ALT_TEXT_LENGTH)}x`;
+    fireEvent.change(alt, { target: { value: overLimit } });
+    expect(alt.value).toBe(overLimit);
+    expect(screen.getByRole("alert").textContent).toContain("code points");
+
+    fireEvent.click(screen.getByRole("button", { name: "Select media detail.png" }));
+    expect(alt.value).toBe(secondMedia.altText);
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(alt, { target: { value: "Second draft" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select media hero.jpg" }));
+    expect(alt.value).toBe(overLimit);
+    expect(screen.getByRole("alert").textContent).toContain("code points");
+    expect(
+      (screen.getByRole("button", { name: "Save alt text" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select media detail.png" }));
+    expect(alt.value).toBe("Second draft");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Save alt text" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it("preserves an edited alt value when its save conflicts", async () => {
