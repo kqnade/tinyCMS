@@ -4,5 +4,19 @@
   "compatibility_date": "2026-08-24",
   "workers_dev": false,
   "preview_urls": false,
-  "minify": true
+  "minify": true,
+  "d1_databases": [
+    {
+      "binding": "CMS_DB",
+      "database_name": "tinycms-admin-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../migrations/d1"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "CONTENT_ARTIFACTS",
+      "bucket_name": "tinycms-content-artifacts-local"
+    }
+  ]
 }

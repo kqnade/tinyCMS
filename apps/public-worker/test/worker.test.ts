@@ -51,6 +51,38 @@ async function expectGenericErrorResponse(response: Response) {
 }
 
 describe("public worker", () => {
+  it("serves the active published HTML artifact with cache validators", async () => {
+    const readPublishedEntry = vi.fn(async () => ({
+      post: {
+        slug: "published-entry",
+        canonicalUrl: "https://notes.example.test/published-entry",
+        noindex: 0 as const,
+      },
+      artifact: {
+        body: "<article><h1>Published entry</h1></article>",
+        etag: '"published-html-etag"',
+      },
+    }));
+    const testApp = createPublicApp(undefined, { readPublishedEntry } as never);
+
+    const response = await testApp.fetch(
+      new Request("https://public.example.test/entry/published-entry"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("Cache-Control")).toBe(
+      "public, max-age=60, stale-while-revalidate=300",
+    );
+    expect(response.headers.get("ETag")).toBe('"published-html-etag"');
+    expect(response.headers.get("Vary")).toBe("Accept");
+    expect(response.headers.get("Link")).toBe(
+      '<https://notes.example.test/published-entry>; rel="canonical"',
+    );
+    expect(await response.text()).toBe("<article><h1>Published entry</h1></article>");
+    expect(readPublishedEntry).toHaveBeenCalledWith("published-entry", "html");
+  });
+
   it("reports health with a generated request ID", async () => {
     const response = await exports.default.fetch("https://public.example.test/healthz");
     const requestId = response.headers.get("X-Request-Id");
