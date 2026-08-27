@@ -675,13 +675,16 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
 
       <main className="studio-main">
         <section className="studio-editor" aria-label="Editor">
-          <input
+          <textarea
             aria-label="Title"
             className="studio-title-input"
             disabled={editorBusy}
-            onChange={(event) => session.setTitle(event.target.value)}
+            onChange={(event) => session.setTitle(event.target.value.replace(/[\r\n]+/g, " "))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.preventDefault();
+            }}
             placeholder="Title"
-            type="text"
+            rows={1}
             value={session.title}
           />
           <StudioEditor

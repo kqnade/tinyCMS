@@ -6,9 +6,9 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --font-sans: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
-  --font-editor: "Iowan Old Style", "Hiragino Mincho ProN", "Yu Mincho", Georgia, ui-serif, serif;
+  --font-editor: "Zen Kaku Gothic Antique", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --editor-measure: 42rem;
+  --editor-measure: 44rem;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;
   --font-size-md: 0.875rem;
@@ -30,6 +30,7 @@
   --muted-foreground: #766f6a;
   --border: #e7e5e4;
   --border-strong: #d6d3d1;
+  --code-background: #f1f1ef;
   --focus: #57534e;
   --focus-soft: #d6d3d1;
   --danger: #b91c1c;
@@ -57,6 +58,7 @@
   --muted-foreground: #a8a29e;
   --border: #44403c;
   --border-strong: #57534e;
+  --code-background: #211f1d;
   --focus: #e7e5e4;
   --focus-soft: #57534e;
   --danger: #fca5a5;
@@ -257,19 +259,23 @@ input[readonly] {
 }
 
 .studio-title-input {
+  field-sizing: content;
   width: 100%;
   min-height: 3.5rem;
+  overflow: hidden;
   padding: 0 0 var(--space-4);
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--foreground);
   font-family: var(--font-editor);
-  font-size: clamp(2.75rem, 6vw, 3.75rem);
+  font-size: clamp(2.5rem, 5vw, 3.25rem);
   font-weight: var(--font-weight-regular);
   letter-spacing: -0.045em;
   line-height: var(--line-height-tight);
   opacity: 1;
+  overflow-wrap: anywhere;
+  resize: none;
 }
 
 .studio-title-input::placeholder {
@@ -311,7 +317,8 @@ input[readonly] {
   color: var(--foreground);
   caret-color: var(--foreground);
   font-family: var(--font-editor);
-  font-size: clamp(1.125rem, 1.5vw, 1.25rem);
+  font-size: clamp(1rem, 1.25vw, 1.125rem);
+  font-synthesis: style;
   line-height: 1.85;
   outline: 0;
 }
@@ -392,7 +399,7 @@ input[readonly] {
   overflow-x: auto;
   padding: var(--space-3) var(--space-4);
   border-inline-start: 3px solid var(--border-strong);
-  background: var(--surface-muted);
+  background: var(--code-background);
   font-family: var(--font-mono);
   font-size: var(--font-size-md);
   line-height: var(--line-height-relaxed);
@@ -1057,11 +1064,11 @@ input[readonly] {
   }
 
   .studio-title-input {
-    font-size: 2.5rem;
+    font-size: 2.25rem;
   }
 
   .studio-body-editor .ProseMirror {
-    font-size: var(--font-size-lg);
+    font-size: var(--font-size-base);
   }
 }
 

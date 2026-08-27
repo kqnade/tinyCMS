@@ -16,6 +16,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -297,6 +298,11 @@ type SlashState = {
   readonly to: number;
 };
 
+type SlashMenuPosition = {
+  readonly left: number;
+  readonly top: number;
+};
+
 const slashCommands: readonly SlashCommand[] = [
   { keywords: ["p"], label: "Paragraph", name: "paragraph" },
   { keywords: ["h1", "title"], label: "Heading 1", name: "heading1" },
@@ -399,9 +405,11 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
   const editableRef = useRef(editable);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState({ from: 0, to: 0 });
   const [slashState, setSlashState] = useState<SlashState | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [slashMenuPosition, setSlashMenuPosition] = useState<SlashMenuPosition | null>(null);
 
   const updateSlashState = (changedEditor: TiptapEditorInstance) => {
     setSlashState(findSlashState(changedEditor));
@@ -449,6 +457,24 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
     editableRef.current = editable;
     editor?.setEditable(editable, false);
   }, [editable, editor]);
+
+  useLayoutEffect(() => {
+    const container = editorContainerRef.current;
+    if (!editor || !slashState || !container) {
+      setSlashMenuPosition(null);
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const cursorRect = editor.view.coordsAtPos(slashState.to);
+    const menuWidth = 12 * 16;
+    const maxLeft = Math.max(0, containerRect.width - menuWidth);
+
+    setSlashMenuPosition({
+      left: Math.min(Math.max(0, cursorRect.left - containerRect.left), maxLeft),
+      top: cursorRect.bottom - containerRect.top + 8,
+    });
+  }, [editor, slashState]);
 
   useImperativeHandle(
     ref,
@@ -573,6 +599,7 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
     <div
       className={className ? `studio-editor-input ${className}` : "studio-editor-input"}
       onKeyDownCapture={handleEditorKeyDown}
+      ref={editorContainerRef}
       style={{ position: "relative" }}
     >
       {editor && selection.from !== selection.to ? (
@@ -592,13 +619,13 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
           ))}
         </div>
       ) : null}
-      {slashState && visibleSlashCommands.length > 0 ? (
+      {slashState && slashMenuPosition && visibleSlashCommands.length > 0 ? (
         <div
           aria-activedescendant={`studio-editor-slash-${visibleSlashCommands[activeSlashIndex]?.name ?? ""}`}
           aria-label="Insert block"
           className="studio-editor-slash-menu"
           role="listbox"
-          style={{ left: 0, position: "absolute", top: "100%", zIndex: 10 }}
+          style={{ ...slashMenuPosition, position: "absolute", zIndex: 10 }}
           tabIndex={0}
         >
           {visibleSlashCommands.map((command, index) => (

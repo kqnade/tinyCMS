@@ -924,7 +924,7 @@ describe("Studio editorial workspace", () => {
 
     await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(secondId));
     expect(api.createPost).not.toHaveBeenCalled();
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Second post",
     );
     expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("Second body");
@@ -972,7 +972,7 @@ describe("Studio editorial workspace", () => {
     render(<App api={api} />);
 
     await waitFor(() => {
-      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).disabled).toBe(
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).disabled).toBe(
         true,
       );
       expect(screen.getByRole("textbox", { name: "Body" }).getAttribute("contenteditable")).toBe(
@@ -981,7 +981,7 @@ describe("Studio editorial workspace", () => {
     });
     resolvePosts?.({ items: [], nextCursor: null });
     await waitFor(() => {
-      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).disabled).toBe(
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).disabled).toBe(
         false,
       );
       expect(screen.getByRole("textbox", { name: "Body" }).getAttribute("contenteditable")).toBe(
@@ -1002,13 +1002,13 @@ describe("Studio editorial workspace", () => {
     await waitFor(() =>
       expect(screen.getByRole("status", { name: "Workspace unavailable" })).toBeTruthy(),
     );
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe("");
     fireEvent.click(screen.getByRole("button", { name: "Retry workspace" }));
 
     await waitFor(() => expect(listPosts).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
     await waitFor(() =>
-      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
         "First post",
       ),
     );
@@ -1067,7 +1067,7 @@ describe("Studio editorial workspace", () => {
       ),
     );
     await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(created.id));
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Local title",
     );
     expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("Local body");
@@ -1081,7 +1081,7 @@ describe("Studio editorial workspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Select post Second post" }));
     await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(secondId));
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Second post",
     );
     expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("Second body");
@@ -1108,7 +1108,7 @@ describe("Studio editorial workspace", () => {
       ),
     );
     await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(secondId));
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Second post",
     );
   });
@@ -1132,7 +1132,7 @@ describe("Studio editorial workspace", () => {
 
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledTimes(1));
     expect(api.getPost).toHaveBeenCalledTimes(1);
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Keep this title",
     );
     expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("First body");
@@ -1155,7 +1155,7 @@ describe("Studio editorial workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select post Second post" }));
 
     await waitFor(() => {
-      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).disabled).toBe(
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).disabled).toBe(
         true,
       );
       expect(screen.getByRole("textbox", { name: "Body" }).getAttribute("contenteditable")).toBe(
@@ -1165,7 +1165,7 @@ describe("Studio editorial workspace", () => {
     expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("First body");
     resolveSecond?.(secondPost);
     await waitFor(() =>
-      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
         "Second post",
       ),
     );
@@ -1260,7 +1260,7 @@ describe("Studio editorial workspace", () => {
     await waitFor(() =>
       expect(screen.getByRole("status").getAttribute("aria-label")).toBe("Conflict"),
     );
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Keep local title",
     );
     expect(screen.getByRole("button", { name: "Overwrite remote with local" })).toBeTruthy();
@@ -1285,7 +1285,7 @@ describe("Studio editorial workspace", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Reload remote draft" }));
     await waitFor(() => expect(api.getPost).toHaveBeenCalledTimes(2));
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Remote title",
     );
     await waitFor(() =>
@@ -1320,7 +1320,7 @@ describe("Studio editorial workspace", () => {
       firstId,
       expect.objectContaining({ expectedDraftVersion: 4, title: "Keep local title" }),
     ]);
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Keep local title",
     );
   });
@@ -1372,7 +1372,7 @@ describe("Studio editorial workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restore revision 1" }));
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledTimes(1));
     expect(api.restoreRevision).not.toHaveBeenCalled();
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Keep local title",
     );
     expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("First body");
@@ -1398,7 +1398,7 @@ describe("Studio editorial workspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Restore revision 1" }));
     await waitFor(() => expect(api.restoreRevision).toHaveBeenCalled());
-    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).disabled).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).disabled).toBe(
       true,
     );
     expect(screen.getByRole("textbox", { name: "Body" }).getAttribute("contenteditable")).toBe(
@@ -1409,7 +1409,7 @@ describe("Studio editorial workspace", () => {
       revision: revision(firstId, "018f0e5d-6a25-7b01-8f4a-7d62a5d3e405", "Restored post", 2),
     });
     await waitFor(() =>
-      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
         "Restored post",
       ),
     );
@@ -1448,7 +1448,7 @@ describe("Studio editorial workspace", () => {
       }),
     );
     await waitFor(() =>
-      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+      expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
         "Restored post",
       ),
     );

@@ -844,7 +844,7 @@ describe("StudioEditor", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("opens a named slash menu after typing a slash", async () => {
+  it("opens a named slash menu below the cursor after typing a slash", async () => {
     installJsdomGeometry();
     const user = userEvent.setup();
     const content = createEditorContent({ type: "doc", content: [] });
@@ -861,6 +861,7 @@ describe("StudioEditor", () => {
     expect(screen.getByRole("option", { name: "Table" })).toBeTruthy();
 
     const listbox = screen.getByRole("listbox", { name: "Insert block" });
+    expect(listbox.style.top).toBe("28px");
     expect(listbox.getAttribute("aria-activedescendant")).toBe("studio-editor-slash-paragraph");
     fireEvent.keyDown(proseMirror, { key: "ArrowDown" });
     expect(listbox.getAttribute("aria-activedescendant")).toBe("studio-editor-slash-heading1");

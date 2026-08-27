@@ -158,8 +158,8 @@ describe("draft session", () => {
       />,
     );
 
-    const title = screen.getByRole("textbox", { name: "Title" });
-    expect((title as HTMLInputElement).disabled).toBe(false);
+    const title = screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement;
+    expect(title.disabled).toBe(false);
     fireEvent.change(title, { target: { value: "Updated title" } });
 
     await waitFor(() => expect(saveDraft).toHaveBeenCalled());
@@ -268,7 +268,7 @@ describe("draft session", () => {
     });
 
     await waitFor(() => expect(screen.getByRole("status").getAttribute("aria-label")).toBe(status));
-    expect(screen.getByRole("textbox", { name: "Title" }).getAttribute("value")).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Keep this title, edited",
     );
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
@@ -304,7 +304,7 @@ describe("draft session", () => {
     );
 
     render(<App persistence={{ saveDraft }} autosaveDelay={0} />);
-    const title = screen.getByRole("textbox", { name: "Title" });
+    const title = screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement;
     fireEvent.change(title, { target: { value: "First" } });
     await waitFor(() => expect(saveDraft).toHaveBeenCalledTimes(1));
 
@@ -314,7 +314,7 @@ describe("draft session", () => {
     await waitFor(() =>
       expect(screen.getByRole("status").getAttribute("aria-label")).toBe("Conflict"),
     );
-    expect(title.getAttribute("value")).toBe("Newer");
+    expect(title.value).toBe("Newer");
     expect(saveDraft).toHaveBeenCalledTimes(1);
   });
 
@@ -331,7 +331,9 @@ describe("draft session", () => {
     await waitFor(() =>
       expect(screen.getByRole("status").getAttribute("aria-label")).toBe("Error"),
     );
-    expect(screen.getByRole("textbox", { name: "Title" }).getAttribute("value")).toBe("Retain me");
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
+      "Retain me",
+    );
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
       false,
     );
@@ -402,7 +404,7 @@ describe("draft session", () => {
       target: { value: "Newer snapshot" },
     });
     expect(screen.getByRole("status").getAttribute("aria-label")).toBe("Dirty");
-    expect(screen.getByRole("textbox", { name: "Title" }).getAttribute("value")).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Newer snapshot",
     );
 
@@ -440,7 +442,7 @@ describe("draft session", () => {
       />,
     );
 
-    expect(screen.getByRole("textbox", { name: "Title" }).getAttribute("value")).toBe(
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
       "Local title",
     );
     expect(screen.getByRole("textbox", { name: "Body" }).textContent).toContain("Local body");
@@ -449,7 +451,7 @@ describe("draft session", () => {
   it("keeps the editor editable while unavailable commands stay disabled without persistence", () => {
     render(<App />);
 
-    const title = screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement;
+    const title = screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement;
     const body = screen.getByRole("textbox", { name: "Body" });
     expect(title.disabled).toBe(false);
     expect(body.getAttribute("contenteditable")).toBe("true");
@@ -558,7 +560,9 @@ describe("draft session", () => {
     await waitFor(() =>
       expect(screen.getByRole("status").getAttribute("aria-label")).toBe("Error"),
     );
-    expect(screen.getByRole("textbox", { name: "Title" }).getAttribute("value")).toBe("Newer");
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLTextAreaElement).value).toBe(
+      "Newer",
+    );
     expect(saveDraft).toHaveBeenCalledTimes(1);
   });
 

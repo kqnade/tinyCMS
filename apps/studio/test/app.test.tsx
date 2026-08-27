@@ -10,12 +10,14 @@ describe("Studio writing surface", () => {
     expect(document).toMatch(/<html\s+lang="en">/);
   });
 
-  it("exposes the document title and body as the primary editing controls", () => {
+  it("exposes a wrapping document title and the body as the primary editing controls", () => {
     const markup = renderToStaticMarkup(<App />);
 
     expect(markup).toContain("<main");
     expect(markup).toContain('<section class="studio-editor" aria-label="Editor">');
-    expect(markup).toMatch(/<input[^>]+aria-label="Title"[^>]+placeholder="Title"[^>]+type="text"/);
+    expect(markup).toMatch(
+      /<textarea[^>]+aria-label="Title"[^>]+placeholder="Title"[^>]+rows="1"[^>]*><\/textarea>/,
+    );
     expect(markup).toContain('class="studio-editor-input studio-body-editor"');
   });
 
