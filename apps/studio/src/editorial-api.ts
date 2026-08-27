@@ -1,4 +1,7 @@
 import {
+  ADMIN_MEDIA_ITEM_ROUTE,
+  ADMIN_MEDIA_ORIGINAL_ROUTE,
+  ADMIN_MEDIA_ROUTE,
   ADMIN_POST_DRAFT_ROUTE,
   ADMIN_POST_REVISION_RESTORE_ROUTE,
   ADMIN_POST_REVISIONS_ROUTE,
@@ -7,8 +10,17 @@ import {
   type CheckpointPostRevisionRequest,
   type CreatePostRequest,
   type CursorPage,
+  type DeleteMediaRequest,
   ErrorCode,
   type ErrorCodeValue,
+  type MediaAsset,
+  type MediaAssetState,
+  type MediaListQuery,
+  type MediaListResponse,
+  type MediaResponse,
+  type MediaRouteParams,
+  type MediaVariant,
+  type MediaVariantFormat,
   type PostDto,
   type PostListItemDto,
   type PostListQuery,
@@ -17,68 +29,24 @@ import {
   type PostRevisionWriteResultDto,
   type RestorePostRevisionRequest,
   type SavePostDraftRequest,
+  type UpdateMediaRequest,
   WRITE_BOUNDARY_HEADER,
   WRITE_BOUNDARY_VALUE,
 } from "@tinycms/contracts";
 
-export const ADMIN_MEDIA_ROUTE = "/api/v1/admin/media" as const;
-export const ADMIN_MEDIA_ITEM_ROUTE = `${ADMIN_MEDIA_ROUTE}/:mediaId` as const;
-export const ADMIN_MEDIA_ORIGINAL_ROUTE = `${ADMIN_MEDIA_ITEM_ROUTE}/original` as const;
-
-export type MediaAssetState = "pending" | "ready" | "failed" | "trash";
-
-export type MediaVariantFormat = "avif" | "webp";
-
-export type MediaVariant = {
-  name: string;
-  width: number;
-  height: number;
-  format: MediaVariantFormat;
-  byteSize: number;
-  url: string;
+export type {
+  DeleteMediaRequest,
+  MediaAsset,
+  MediaAssetState,
+  MediaListQuery,
+  MediaListResponse,
+  MediaResponse,
+  MediaRouteParams,
+  MediaVariant,
+  MediaVariantFormat,
+  UpdateMediaRequest,
 };
-
-export type MediaAsset = {
-  id: string;
-  filename: string;
-  mediaType: string;
-  byteSize: number;
-  width: number;
-  height: number;
-  altText: string;
-  contentHash: string;
-  state: MediaAssetState;
-  version: number;
-  variants: MediaVariant[];
-  createdBy: string;
-  createdAt: `${string}Z`;
-  updatedAt: `${string}Z`;
-};
-
-export type MediaListQuery = {
-  cursor?: string;
-  limit?: number;
-};
-
-export type MediaRouteParams = {
-  mediaId: string;
-};
-
-export type UpdateMediaRequest = {
-  expectedVersion: number;
-  altText: string;
-};
-
-export type DeleteMediaRequest = {
-  expectedVersion: number;
-};
-
-export type MediaResponse = { data: MediaAsset; meta: { requestId: string } };
-
-export type MediaListResponse = {
-  data: CursorPage<MediaAsset>;
-  meta: { requestId: string };
-};
+export { ADMIN_MEDIA_ITEM_ROUTE, ADMIN_MEDIA_ORIGINAL_ROUTE, ADMIN_MEDIA_ROUTE };
 
 export type MediaApi = {
   listMedia: (query?: MediaListQuery) => Promise<CursorPage<MediaAsset>>;
@@ -111,14 +79,12 @@ export type EditorialApi = {
 
 export type EditorialApiErrorKind = "conflict" | "error";
 
-type EditorialApiErrorCode = ErrorCodeValue | "MEDIA_WRITE_FAILED";
-
 export class EditorialApiError extends Error {
-  readonly code: EditorialApiErrorCode | undefined;
+  readonly code: ErrorCodeValue | undefined;
   readonly kind: EditorialApiErrorKind;
   readonly status: number;
 
-  constructor(status: number, code?: EditorialApiErrorCode) {
+  constructor(status: number, code?: ErrorCodeValue) {
     super("Editorial API request failed");
     this.name = "EditorialApiError";
     this.kind = status === 409 && code === ErrorCode.CONFLICT ? "conflict" : "error";
@@ -138,9 +104,9 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function safeErrorCode(value: unknown): EditorialApiErrorCode | undefined {
+function safeErrorCode(value: unknown): ErrorCodeValue | undefined {
   if (
-    value === "MEDIA_WRITE_FAILED" ||
+    value === ErrorCode.MEDIA_WRITE_FAILED ||
     value === ErrorCode.INVALID_REQUEST ||
     value === ErrorCode.AUTH_REQUIRED ||
     value === ErrorCode.AUTH_INVALID ||
