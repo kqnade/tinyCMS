@@ -17,7 +17,7 @@ checksum = "sha256:d1b5e999db158c62fe8f7267a4476b035d8bd93b1a605bac24a3f0dd166e3
 url = "https://nodejs.org/dist/v24.19.0/node-v24.19.0-darwin-x64.tar.gz"
 
 [[tools."npm:wrangler"]]
-version = "4.125.0"
+version = "4.127.0"
 backend = "npm:wrangler"
 
 [[tools.pnpm]]
