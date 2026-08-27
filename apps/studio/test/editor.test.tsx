@@ -155,6 +155,174 @@ describe("StudioEditor", () => {
     expect(editorRef.current?.getContent()).not.toHaveProperty("document");
   });
 
+  it("renders a canonical image through the authenticated Studio media endpoint", () => {
+    render(
+      <StudioEditor
+        content={createEditorContent({
+          type: "doc",
+          content: [
+            {
+              type: "image",
+              attrs: {
+                mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10",
+                alt: 'A & < "',
+                caption: "A caption",
+              },
+            },
+          ],
+        })}
+      />,
+    );
+
+    const figure = document.querySelector("figure");
+    const image = figure?.querySelector("img");
+    expect(image?.getAttribute("src")).toBe(
+      "/api/v1/admin/media/018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10/original",
+    );
+    expect(image?.getAttribute("alt")).toBe('A & < "');
+    expect(figure?.querySelector("figcaption")?.textContent).toBe("A caption");
+  });
+
+  it("rejects malformed image content without replacing mounted content or saving it", () => {
+    const valid = createEditorContent({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Keep this" }] }],
+    });
+    const malformed = {
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "image",
+            attrs: {
+              mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10",
+              alt: "",
+              caption: null,
+              title: "not canonical",
+            },
+          },
+        ],
+      },
+    } as unknown as EditorContent;
+    const onChange = vi.fn();
+    const editorRef = createRef<StudioEditorHandle>();
+    render(<StudioEditor content={valid} onChange={onChange} ref={editorRef} />);
+
+    expect(() => editorRef.current?.setContent(malformed)).toThrow(
+      "Studio editor content normalization failed",
+    );
+    expect(editorRef.current?.getContent()).toEqual(valid);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(document.querySelector(".ProseMirror")?.textContent).toBe("Keep this");
+  });
+
+  it.each(["list", "blockquote", "table"] as const)(
+    "inserts one image after the top-level block for a %s selection",
+    async (nestedType) => {
+      installJsdomGeometry();
+      const content = createEditorContent({
+        type: "doc",
+        content:
+          nestedType === "list"
+            ? [
+                {
+                  type: "bulletList",
+                  content: [
+                    {
+                      type: "listItem",
+                      content: [{ type: "paragraph", content: [{ type: "text", text: "List" }] }],
+                    },
+                  ],
+                },
+                { type: "paragraph", content: [{ type: "text", text: "After" }] },
+              ]
+            : nestedType === "blockquote"
+              ? [
+                  {
+                    type: "blockquote",
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "Quote" }] }],
+                  },
+                  { type: "paragraph", content: [{ type: "text", text: "After" }] },
+                ]
+              : [
+                  {
+                    type: "table",
+                    content: [
+                      {
+                        type: "tableRow",
+                        content: [
+                          {
+                            type: "tableHeader",
+                            attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                            content: [
+                              { type: "paragraph", content: [{ type: "text", text: "H" }] },
+                            ],
+                          },
+                        ],
+                      },
+                      {
+                        type: "tableRow",
+                        content: [
+                          {
+                            type: "tableCell",
+                            attrs: { colspan: 1, rowspan: 1, colwidth: null },
+                            content: [
+                              { type: "paragraph", content: [{ type: "text", text: "Cell" }] },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  { type: "paragraph", content: [{ type: "text", text: "After" }] },
+                ],
+      });
+      const editorRef = createRef<StudioEditorHandle>();
+      render(<StudioEditor content={content} ref={editorRef} />);
+      const proseMirror = document.querySelector<HTMLElement>(".ProseMirror");
+      const target = proseMirror?.querySelector(
+        nestedType === "list" ? "li p" : nestedType === "blockquote" ? "blockquote p" : "td p",
+      );
+      if (!proseMirror || !target) throw new Error("Nested selection target is missing");
+
+      proseMirror.focus();
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      await new Promise((resolve) => window.setTimeout(resolve, 30));
+
+      const insertImage = (
+        editorRef.current as StudioEditorHandle & {
+          insertImage: (attrs: { mediaId: string; alt: string; caption: string | null }) => void;
+        }
+      ).insertImage;
+      insertImage({
+        mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10",
+        alt: "Inserted",
+        caption: null,
+      });
+
+      const topLevel = editorRef.current?.getContent().content.content ?? [];
+      expect(topLevel.filter((node) => node.type === "image")).toHaveLength(1);
+      expect(topLevel[1]).toEqual({
+        type: "image",
+        attrs: {
+          mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10",
+          alt: "Inserted",
+          caption: null,
+        },
+      });
+      expect(topLevel[0]?.type).toBe(
+        nestedType === "table" ? "table" : nestedType === "list" ? "bulletList" : "blockquote",
+      );
+    },
+  );
+
   it("normalizes ordered-list attrs from the mounted Tiptap JSON", () => {
     const editorRef = createRef<StudioEditorHandle>();
     render(

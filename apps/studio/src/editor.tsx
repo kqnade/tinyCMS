@@ -7,7 +7,7 @@ import {
 } from "@tiptap/core";
 import { BulletList, ListItem, ListKit, OrderedList, TaskItem } from "@tiptap/extension-list";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import type { DOMOutputSpec, Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { EditorContent as TiptapEditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -29,10 +29,12 @@ import {
   parseEditorContent,
   type RawTiptapDoc,
   type RawTiptapNode,
+  type StudioImageAttrs,
 } from "./editor-content";
 
 export type StudioEditorHandle = {
   getContent: () => EditorContent;
+  insertImage: (attrs: StudioImageAttrs) => void;
   setContent: (content: EditorContent) => void;
   focus: () => void;
 };
@@ -67,6 +69,36 @@ const StudioTableHeader = TableHeader.extend({
 
 const StudioTableRow = TableRow.extend({
   content: "(tableCell | tableHeader)+",
+});
+
+const StudioImage = Node.create({
+  name: "image",
+  group: "block",
+  inline: false,
+  atom: true,
+  addAttributes() {
+    return {
+      mediaId: { default: null },
+      alt: { default: "" },
+      caption: { default: null },
+    };
+  },
+  renderHTML({ node }): DOMOutputSpec {
+    const attrs = node.attrs as StudioImageAttrs;
+    const children: DOMOutputSpec[] = [
+      [
+        "img",
+        {
+          src: `/api/v1/admin/media/${encodeURIComponent(attrs.mediaId)}/original`,
+          alt: attrs.alt,
+        },
+      ],
+    ];
+    if (attrs.caption !== null) {
+      children.push(["figcaption", {}, attrs.caption]);
+    }
+    return ["figure", {}, ...children];
+  },
 });
 
 function hasSupportedTableStructure(document: ProseMirrorNode): boolean {
@@ -194,6 +226,7 @@ const editorExtensions = [
   StudioTableCell,
   StudioTableHeader,
   StudioTableRow,
+  StudioImage,
   StudioTableStructureGuard,
 ];
 
@@ -224,6 +257,16 @@ function toRawTiptapNode(value: JSONContent): RawTiptapNode {
 
 function getCanonicalContent(editor: TiptapEditorInstance): EditorContent {
   return createEditorContent(toRawTiptapDoc(editor.getJSON()));
+}
+
+function getTopLevelInsertionPosition(editor: TiptapEditorInstance): number {
+  const { $from } = editor.state.selection;
+  if ($from.depth > 0) return $from.after(1);
+
+  const topLevelIndex = $from.index(0);
+  return topLevelIndex < editor.state.doc.childCount
+    ? $from.pos + editor.state.doc.child(topLevelIndex).nodeSize
+    : editor.state.doc.content.size;
 }
 
 type FormatName = "bold" | "code" | "italic" | "link" | "strike";
@@ -458,6 +501,24 @@ export const StudioEditor = forwardRef<StudioEditorHandle, StudioEditorProps>(fu
         editor
           ? cloneEditorContent(getCanonicalContent(editor))
           : cloneEditorContent(resolvedContent),
+      insertImage: (attrs) => {
+        if (!editor?.isEditable) return;
+
+        const imageContent = createEditorContent({
+          type: "doc",
+          content: [{ type: "image", attrs }],
+        }).content.content[0];
+        if (imageContent?.type !== "image" || imageContent.attrs === undefined) return;
+
+        const imageType = editor.state.schema.nodes.image;
+        if (imageType === undefined) {
+          throw new Error("Studio image node is not registered");
+        }
+        const imageNode = imageType.create(imageContent.attrs);
+        editor.view.dispatch(
+          editor.state.tr.insert(getTopLevelInsertionPosition(editor), imageNode).scrollIntoView(),
+        );
+      },
       setContent: (nextContent) => {
         const parsedContent = parseEditorContent(nextContent);
         editor?.commands.setContent(toTiptapDocument(parsedContent.content), {

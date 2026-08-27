@@ -59,6 +59,112 @@ describe("Studio editor content", () => {
     ).toMatchObject({ ok: false });
   });
 
+  it("rejects image attrs outside the canonical media contract", () => {
+    const result = normalizeEditorContent({
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "image",
+            attrs: {
+              mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10",
+              alt: "Preview",
+              caption: null,
+              title: "not canonical",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues[0]).toMatchObject({
+      code: "unknown_key",
+      path: ["content", "content", 0, "attrs", "title"],
+    });
+  });
+
+  it.each([
+    ["blank alt", "", null],
+    ["caption", "Accessible", "A caption"],
+  ] as const)("round-trips an image with %s", (_label, alt, caption) => {
+    const content = createEditorContent({
+      type: "doc",
+      content: [
+        {
+          type: "image",
+          attrs: {
+            mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10",
+            alt,
+            caption,
+          },
+        },
+      ],
+    });
+
+    expect(normalizeEditorContent(content)).toEqual({ ok: true, value: content });
+    expect(content).toEqual({
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "image",
+            attrs: {
+              mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10",
+              alt,
+              caption,
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it.each([
+    ["missing media ID", { alt: "", caption: null }],
+    ["non-string alt", { mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10", alt: 1, caption: null }],
+    [
+      "non-string caption",
+      { mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10", alt: "", caption: false },
+    ],
+  ] as const)("rejects an image with %s", (_label, attrs) => {
+    const result = normalizeEditorContent({
+      contentVersion: 1,
+      content: { type: "doc", content: [{ type: "image", attrs }] },
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects images nested below a top-level document block", () => {
+    const result = normalizeEditorContent({
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "blockquote",
+            content: [
+              {
+                type: "image",
+                attrs: {
+                  mediaId: "018f0f7b-7b6d-7a2e-8f4e-3f1c8d5e9a10",
+                  alt: "",
+                  caption: null,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
   it.each([
     ["javascript scheme", "javascript:alert(1)"],
     ["relative URL", "/docs"],

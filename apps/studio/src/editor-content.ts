@@ -3,6 +3,7 @@ export const CONTENT_VERSION = 1 as const;
 const MAX_DEPTH = 128;
 const MAX_VALUES = 1_000;
 const MAX_ISSUES = 64;
+const UUIDV7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 type Path = readonly (string | number)[];
 type JsonRecord = Readonly<Record<string, unknown>>;
@@ -23,6 +24,12 @@ export type RawTiptapNode = {
 export type RawTiptapDoc = {
   readonly type: "doc";
   readonly content: readonly RawTiptapNode[];
+};
+
+export type StudioImageAttrs = {
+  readonly mediaId: string;
+  readonly alt: string;
+  readonly caption: string | null;
 };
 
 export type EditorContent = {
@@ -247,6 +254,10 @@ function normalizeNode(
       return undefined;
     }
 
+    if (value.type === "image") {
+      return normalizeImageNode(value, path, context, parentType);
+    }
+
     const hasAttrs = hasOwn(value, "attrs");
     const attrs =
       value.type === "tableCell" || value.type === "tableHeader"
@@ -298,6 +309,65 @@ function normalizeNode(
       ...(marks === undefined ? {} : { marks }),
     } satisfies RawTiptapNode;
   });
+}
+
+function normalizeImageNode(
+  value: Record<string, unknown>,
+  path: Path,
+  context: NormalizationContext,
+  parentType: string,
+): RawTiptapNode | undefined {
+  if (!hasOnlyKeys(value, ["type", "attrs"], path, context)) return undefined;
+  if (parentType !== "doc") {
+    context.add(
+      [...path, "type"],
+      "invalid_image_nesting",
+      "Images are only allowed as top-level document blocks",
+    );
+    return undefined;
+  }
+
+  const attrs = normalizeImageAttrs(value.attrs, [...path, "attrs"], context);
+  if (attrs === undefined) return undefined;
+  return { type: "image", attrs };
+}
+
+function normalizeImageAttrs(
+  input: unknown,
+  path: Path,
+  context: NormalizationContext,
+): StudioImageAttrs | undefined {
+  const attrs = normalizeJsonRecord(input, path, context);
+  if (attrs === undefined || !hasOnlyKeys(attrs, ["mediaId", "alt", "caption"], path, context)) {
+    return undefined;
+  }
+
+  if (typeof attrs.mediaId !== "string" || !UUIDV7_PATTERN.test(attrs.mediaId)) {
+    context.add(
+      [...path, "mediaId"],
+      "invalid_media_id",
+      "Image mediaId must be a lowercase UUIDv7",
+    );
+    return undefined;
+  }
+  if (typeof attrs.alt !== "string") {
+    context.add([...path, "alt"], "invalid_image_alt", "Image alt must be a string");
+    return undefined;
+  }
+  if (attrs.caption !== null && typeof attrs.caption !== "string") {
+    context.add(
+      [...path, "caption"],
+      "invalid_image_caption",
+      "Image caption must be a string or null",
+    );
+    return undefined;
+  }
+
+  return {
+    mediaId: attrs.mediaId,
+    alt: attrs.alt,
+    caption: attrs.caption,
+  };
 }
 
 function validateTableStructure(
