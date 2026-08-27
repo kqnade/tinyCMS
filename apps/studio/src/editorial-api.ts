@@ -4,6 +4,7 @@ import {
   ADMIN_MEDIA_ROUTE,
   ADMIN_POST_DRAFT_ROUTE,
   ADMIN_POST_PREVIEW_ROUTE,
+  ADMIN_POST_PUBLISH_ROUTE,
   ADMIN_POST_REVISION_RESTORE_ROUTE,
   ADMIN_POST_REVISIONS_ROUTE,
   ADMIN_POST_ROUTE,
@@ -30,6 +31,8 @@ import {
   type PostRevisionWriteResultDto,
   type PreviewPostRequest,
   type PreviewPostResultDto,
+  type PublishPostRequest,
+  type PublishPostResultDto,
   type RestorePostRevisionRequest,
   type SavePostDraftRequest,
   type UpdateMediaRequest,
@@ -65,6 +68,7 @@ export type EditorialApi = {
   createPost: (request?: CreatePostRequest) => Promise<PostDto>;
   getPost: (postId: string) => Promise<PostDto>;
   previewPost: (postId: string, request: PreviewPostRequest) => Promise<PreviewPostResultDto>;
+  publishPost: (postId: string, request: PublishPostRequest) => Promise<PublishPostResultDto>;
   saveDraft: (postId: string, request: SavePostDraftRequest) => Promise<PostDto>;
   listRevisions: (
     postId: string,
@@ -214,6 +218,12 @@ export function createEditorialApi(options: EditorialApiOptions = {}): Editorial
     previewPost: (postId, body) =>
       request<PreviewPostResultDto>(
         ADMIN_POST_PREVIEW_ROUTE.replace(":postId", encodePathPart(postId)),
+        { body: requestBody(body), method: "POST" },
+        "json",
+      ),
+    publishPost: (postId, body) =>
+      request<PublishPostResultDto>(
+        ADMIN_POST_PUBLISH_ROUTE.replace(":postId", encodePathPart(postId)),
         { body: requestBody(body), method: "POST" },
         "json",
       ),

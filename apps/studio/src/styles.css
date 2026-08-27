@@ -244,6 +244,15 @@ input[readonly] {
   font-size: var(--font-size-sm);
 }
 
+.studio-publish-status {
+  color: var(--muted-foreground);
+  font-size: var(--font-size-xs);
+}
+
+.studio-publish-status--error {
+  color: var(--danger);
+}
+
 .studio-preview-button.ui-button {
   min-height: 2.25rem;
   padding: 0 var(--space-4);

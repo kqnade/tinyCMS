@@ -172,6 +172,13 @@ function createMockApi(overrides: Partial<EditorialApi> = {}): EditorialApi {
     previewPost: vi.fn<EditorialApi["previewPost"]>(async (_postId, request) => ({
       html: `<article><h1>${request.title}</h1><p>Preview body</p></article>`,
     })),
+    publishPost: vi.fn<EditorialApi["publishPost"]>(async (postId) => ({
+      post: post(postId, "Published post", "Published body", 2, 2),
+      revision: revision(postId, firstRevisionId, "Published post", 2),
+      publicationJobId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e406",
+      htmlPath: `posts/${postId}/revisions/${firstRevisionId}.html`,
+      markdownPath: `posts/${postId}/revisions/${firstRevisionId}.md`,
+    })),
     listMedia: vi.fn(async () => ({ items: [firstMedia], nextCursor: null })),
     getMedia: vi.fn(async () => firstMedia),
     getMediaOriginalUrl: vi.fn((mediaId) => `/api/v1/admin/media/${mediaId}/original`),
@@ -215,6 +222,39 @@ async function openStudioMenu() {
 }
 
 describe("Studio editorial workspace", () => {
+  it("publishes the saved draft and updates the current post", async () => {
+    const user = userEvent.setup();
+    const published = {
+      ...post(firstId, "First post", "First body", 1, 2),
+      lifecycle: "published" as const,
+    };
+    const publishPost = vi.fn<EditorialApi["publishPost"]>(async () => ({
+      post: published,
+      revision: revision(firstId, firstRevisionId, "First post", 2),
+      publicationJobId: "018f0e5d-6a25-7b01-8f4a-7d62a5d3e406",
+      htmlPath: `posts/${firstId}/revisions/${firstRevisionId}.html`,
+      markdownPath: `posts/${firstId}/revisions/${firstRevisionId}.md`,
+    }));
+    const api = createMockApi({ publishPost });
+    render(<App api={api} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+
+    const publishButton = screen.getByRole("button", { name: "Publish" });
+    await user.click(publishButton);
+
+    await waitFor(() =>
+      expect(publishPost).toHaveBeenCalledWith(firstId, {
+        expectedDraftVersion: firstPost.draftVersion,
+        expectedRevisionVersion: firstPost.currentRevisionVersion,
+        idempotencyKey: expect.stringMatching(/^studio:[0-9a-f-]+:\d+:\d+$/),
+      }),
+    );
+    expect((await screen.findByRole("status", { name: "Published" })).textContent).toBe(
+      "Published",
+    );
+    expect((publishButton as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("previews the current in-memory draft without saving and can be dismissed", async () => {
     const user = userEvent.setup();
     const previewPost = vi.fn<EditorialApi["previewPost"]>(async (_postId, request) => ({

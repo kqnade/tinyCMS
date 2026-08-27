@@ -35,10 +35,12 @@ type WorkspaceAction =
   | "create"
   | "load"
   | "preview"
+  | "publish"
   | "reload"
   | "restore"
   | "retry";
 type Panel = "history" | "media" | "posts";
+type PublicationStatus = "error" | "idle" | "published";
 type PreviewState =
   | { readonly status: "error" }
   | { readonly status: "loading" }
@@ -174,6 +176,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
   const [historyState, setHistoryState] = useState<WorkspaceState>("idle");
   const [editorVersion, setEditorVersion] = useState(0);
   const [previewState, setPreviewState] = useState<PreviewState | null>(null);
+  const [publicationStatus, setPublicationStatus] = useState<PublicationStatus>("idle");
   const selectedPostIdRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
   const startedApiRef = useRef<EditorialApi | null>(null);
@@ -511,6 +514,33 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
     }
   }, [api, selectedPost, session, workspaceAction]);
 
+  const publishPost = useCallback(async () => {
+    if (api === undefined || selectedPost === null || workspaceAction !== null) return;
+    setWorkspaceAction("publish");
+    setPublicationStatus("idle");
+    try {
+      await session.save();
+      if (session.getSaveState() !== "saved") return;
+      const snapshot = session.getSnapshot();
+      const result = await api.publishPost(selectedPost.id, {
+        expectedDraftVersion: snapshot.draftVersion,
+        expectedRevisionVersion: selectedPost.currentRevisionVersion ?? 0,
+        idempotencyKey: `studio:${selectedPost.id}:${snapshot.draftVersion}:${Date.now()}`,
+      });
+      applyPost(result.post);
+      setRevisions([revisionToListItem(result.revision)]);
+      historyLoadedForRef.current = selectedPost.id;
+      setPublicationStatus("published");
+    } catch (error) {
+      if (isEditorialConflict(error)) {
+        session.markSaveState("conflict");
+      }
+      setPublicationStatus("error");
+    } finally {
+      setWorkspaceAction(null);
+    }
+  }, [api, applyPost, selectedPost, session, workspaceAction]);
+
   const previewOpen = previewState !== null;
 
   useEffect(() => {
@@ -612,13 +642,24 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             >
               Preview
             </Button>
+            {publicationStatus === "published" ? (
+              <span aria-label="Published" className="studio-publish-status" role="status">
+                Published
+              </span>
+            ) : null}
+            {publicationStatus === "error" ? (
+              <span className="studio-publish-status studio-publish-status--error" role="alert">
+                Publish failed
+              </span>
+            ) : null}
             <Button
               aria-label="Publish"
               className="studio-publish-button"
-              disabled
+              disabled={api === undefined || selectedPost === null || workspaceAction !== null}
+              onClick={() => void publishPost()}
               variant="primary"
             >
-              Publish
+              {workspaceAction === "publish" ? "Publishing…" : "Publish"}
             </Button>
           </div>
         </div>
@@ -773,7 +814,10 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             aria-label="Title"
             className="studio-title-input"
             disabled={editorBusy}
-            onChange={(event) => session.setTitle(event.target.value.replace(/[\r\n]+/g, " "))}
+            onChange={(event) => {
+              setPublicationStatus("idle");
+              session.setTitle(event.target.value.replace(/[\r\n]+/g, " "));
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter") event.preventDefault();
             }}
@@ -787,7 +831,10 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             editable={!editorBusy}
             initialContent={session.content}
             key={`${selectedPostId ?? "empty"}-${editorVersion}`}
-            onChange={session.setContent}
+            onChange={(content) => {
+              setPublicationStatus("idle");
+              session.setContent(content);
+            }}
             ref={editorRef}
           />
           <div
