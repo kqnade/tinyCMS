@@ -8,6 +8,7 @@ import {
   type PostRevisionListQuery,
   type PostRevisionRouteParams,
   type PostRouteParams,
+  type PreviewPostRequest,
   type RestorePostRevisionRequest,
   type SavePostDraftRequest,
   type UtcTimestamp,
@@ -54,6 +55,7 @@ const SAVE_POST_DRAFT_KEYS = [
   "content",
   "metadata",
 ] as const;
+const PREVIEW_POST_KEYS = ["title", "excerpt", "contentVersion", "content", "metadata"] as const;
 const EXPECTED_CONCURRENCY_VERSION_KEYS = [
   "expectedDraftVersion",
   "expectedRevisionVersion",
@@ -479,6 +481,118 @@ export function parseSavePostDraftRequest(
     expectedDraftVersion: expectedDraftVersion as number,
     title: title as string,
   } as SavePostDraftRequest;
+  if (hasExcerpt) {
+    value.excerpt = excerpt as string | null;
+  }
+  value.contentVersion = contentVersion as typeof EDITOR_CONTENT_VERSION;
+  value.content = content;
+  if (hasMetadata) {
+    value.metadata = metadata as JsonObject;
+  }
+  return { ok: true, value };
+}
+
+export function parsePreviewPostRequest(input: unknown): ContractParseResult<PreviewPostRequest> {
+  const inspection = inspectObject(input, PREVIEW_POST_KEYS);
+  if (!isObjectInspection(inspection)) {
+    return { ok: false, issues: inspection };
+  }
+
+  const issues = [...inspection.issues];
+  let title: string | undefined;
+  let excerpt: string | null | undefined;
+  let hasExcerpt = false;
+  let contentVersion: typeof EDITOR_CONTENT_VERSION | undefined;
+  let content: unknown;
+  let metadata: JsonObject | undefined;
+  let hasMetadata = false;
+
+  if (inspection.keys.includes("title")) {
+    const read = readProperty(inspection.record, "title");
+    if (!read.ok) {
+      issues.push(issue(["title"], "invalid_value", "Property could not be read safely."));
+    } else {
+      const parsed = parseBoundedString(read.value, MAX_TITLE_LENGTH, "title");
+      if (!parsed.ok) {
+        appendIssues(issues, "title", parsed.issues);
+      } else {
+        title = parsed.value;
+      }
+    }
+  } else {
+    issues.push(issue(["title"], "missing_key", "Required property is missing."));
+  }
+
+  if (inspection.keys.includes("excerpt")) {
+    hasExcerpt = true;
+    const read = readProperty(inspection.record, "excerpt");
+    if (!read.ok) {
+      issues.push(issue(["excerpt"], "invalid_value", "Property could not be read safely."));
+    } else if (read.value === null) {
+      excerpt = null;
+    } else {
+      const parsed = parseBoundedString(read.value, MAX_EXCERPT_LENGTH, "excerpt");
+      if (!parsed.ok) {
+        appendIssues(issues, "excerpt", parsed.issues);
+      } else {
+        excerpt = parsed.value;
+      }
+    }
+  }
+
+  if (inspection.keys.includes("contentVersion")) {
+    const read = readProperty(inspection.record, "contentVersion");
+    if (!read.ok) {
+      issues.push(issue(["contentVersion"], "invalid_value", "Property could not be read safely."));
+    } else {
+      const parsed = parseContentVersion(read.value);
+      if (!parsed.ok) {
+        appendIssues(issues, "contentVersion", parsed.issues);
+      } else {
+        contentVersion = parsed.value;
+      }
+    }
+  } else {
+    issues.push(issue(["contentVersion"], "missing_key", "Required property is missing."));
+  }
+
+  if (inspection.keys.includes("content")) {
+    const read = readProperty(inspection.record, "content");
+    if (!read.ok) {
+      issues.push(issue(["content"], "invalid_value", "Property could not be read safely."));
+    } else if (read.value === undefined) {
+      issues.push(issue(["content"], "invalid_content", "Content must not be undefined."));
+    } else {
+      content = read.value;
+    }
+  } else {
+    issues.push(issue(["content"], "missing_key", "Required property is missing."));
+  }
+
+  if (inspection.keys.includes("metadata")) {
+    hasMetadata = true;
+    const read = readProperty(inspection.record, "metadata");
+    if (!read.ok) {
+      issues.push(issue(["metadata"], "invalid_value", "Property could not be read safely."));
+      hasMetadata = false;
+    } else {
+      const parsed = parseMetadata(read.value);
+      if (!parsed.ok) {
+        appendIssues(issues, "metadata", parsed.issues);
+        hasMetadata = false;
+      } else {
+        metadata = parsed.value;
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  const value = {
+    title: title as string,
+  } as PreviewPostRequest;
   if (hasExcerpt) {
     value.excerpt = excerpt as string | null;
   }

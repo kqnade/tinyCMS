@@ -13,6 +13,7 @@ import {
   ADMIN_MEDIA_ORIGINAL_ROUTE,
   ADMIN_MEDIA_ROUTE,
   ADMIN_POST_DRAFT_ROUTE,
+  ADMIN_POST_PREVIEW_ROUTE,
   ADMIN_POST_REVISION_RESTORE_ROUTE,
   ADMIN_POST_REVISIONS_ROUTE,
   ADMIN_POST_ROUTE,
@@ -30,6 +31,7 @@ import {
   parsePostRevisionListQuery,
   parsePostRevisionRouteParams,
   parsePostRouteParams,
+  parsePreviewPostRequest,
   parseRestorePostRevisionRequest,
   parseSavePostDraftRequest,
   parseUpdateMediaRequest,
@@ -1032,6 +1034,20 @@ export function createAdminApp(dependencies: AccessDependencies = {}) {
     );
     if (params instanceof Response) return params;
     return applicationResponse(context, resolveApplication(context).getPost(params.postId));
+  });
+
+  application.post(ADMIN_POST_PREVIEW_ROUTE, async (context) => {
+    const params = requestParams(
+      context,
+      parsePostRouteParams({ postId: context.req.param("postId") }),
+    );
+    if (params instanceof Response) return params;
+    const body = await readJsonBody(context.req.raw);
+    if (!body.ok) return invalidRequest(context, [{ code: "invalid_body", message: body.message }]);
+    const parsed = parsePreviewPostRequest(body.value);
+    const request = requestParams(context, parsed);
+    if (request instanceof Response) return request;
+    return applicationResponse(context, resolveApplication(context).previewPost(request));
   });
 
   application.put(ADMIN_POST_DRAFT_ROUTE, async (context) => {

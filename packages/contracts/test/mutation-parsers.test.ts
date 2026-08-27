@@ -9,11 +9,52 @@ import {
   MAX_TITLE_LENGTH,
   parseCheckpointPostRevisionRequest,
   parseCreatePostRequest,
+  parsePreviewPostRequest,
   parseRestorePostRevisionRequest,
   parseSavePostDraftRequest,
 } from "../src/index";
 
 describe("editor mutation body parsers", () => {
+  it("parses a complete preview request without a concurrency field", () => {
+    const content = { type: "doc", content: [] };
+    const metadata = { seo: { description: "A preview" } };
+
+    expect(
+      parsePreviewPostRequest({
+        title: "Preview title",
+        excerpt: null,
+        metadata,
+        contentVersion: 1,
+        content,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        title: "Preview title",
+        excerpt: null,
+        metadata,
+        contentVersion: 1,
+        content,
+      },
+    });
+
+    expect(parsePreviewPostRequest({ title: "Preview title", contentVersion: 1, content })).toEqual(
+      {
+        ok: true,
+        value: { title: "Preview title", contentVersion: 1, content },
+      },
+    );
+
+    for (const input of [
+      { contentVersion: 1, content },
+      { title: "Preview title", content },
+      { title: "Preview title", contentVersion: 1 },
+      { title: "Preview title", contentVersion: 1, content, expectedDraftVersion: 1 },
+    ]) {
+      expect(parsePreviewPostRequest(input)).toMatchObject({ ok: false });
+    }
+  });
+
   it("accepts an empty create request", () => {
     expect(parseCreatePostRequest({})).toEqual({ ok: true, value: {} });
   });

@@ -3,6 +3,7 @@ import {
   ADMIN_MEDIA_ORIGINAL_ROUTE,
   ADMIN_MEDIA_ROUTE,
   ADMIN_POST_DRAFT_ROUTE,
+  ADMIN_POST_PREVIEW_ROUTE,
   ADMIN_POST_REVISION_RESTORE_ROUTE,
   ADMIN_POST_REVISIONS_ROUTE,
   ADMIN_POST_ROUTE,
@@ -27,6 +28,8 @@ import {
   type PostRevisionListItemDto,
   type PostRevisionListQuery,
   type PostRevisionWriteResultDto,
+  type PreviewPostRequest,
+  type PreviewPostResultDto,
   type RestorePostRevisionRequest,
   type SavePostDraftRequest,
   type UpdateMediaRequest,
@@ -61,6 +64,7 @@ export type EditorialApi = {
   listPosts: (query?: PostListQuery) => Promise<CursorPage<PostListItemDto>>;
   createPost: (request?: CreatePostRequest) => Promise<PostDto>;
   getPost: (postId: string) => Promise<PostDto>;
+  previewPost: (postId: string, request: PreviewPostRequest) => Promise<PreviewPostResultDto>;
   saveDraft: (postId: string, request: SavePostDraftRequest) => Promise<PostDto>;
   listRevisions: (
     postId: string,
@@ -207,6 +211,12 @@ export function createEditorialApi(options: EditorialApiOptions = {}): Editorial
       request<PostDto>(ADMIN_POSTS_ROUTE, { body: requestBody(body), method: "POST" }, "json"),
     getPost: (postId) =>
       request<PostDto>(`${ADMIN_POST_ROUTE.replace(":postId", encodePathPart(postId))}`),
+    previewPost: (postId, body) =>
+      request<PreviewPostResultDto>(
+        ADMIN_POST_PREVIEW_ROUTE.replace(":postId", encodePathPart(postId)),
+        { body: requestBody(body), method: "POST" },
+        "json",
+      ),
     saveDraft: (postId, body) =>
       request<PostDto>(
         ADMIN_POST_DRAFT_ROUTE.replace(":postId", encodePathPart(postId)),

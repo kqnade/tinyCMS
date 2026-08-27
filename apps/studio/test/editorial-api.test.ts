@@ -253,6 +253,30 @@ describe("editorial API client", () => {
     expect(init?.body).toBe(JSON.stringify(body));
   });
 
+  it("sends the write boundary headers and exact JSON body for unsaved previews", async () => {
+    const fetcher = vi.fn<Fetcher>(async () => success({ html: "<article>Preview</article>" }));
+    const api = createEditorialApi({ fetcher });
+    const body = {
+      content: post.content,
+      contentVersion: 1 as const,
+      excerpt: null,
+      metadata: { seo: { description: "Preview" } },
+      title: "Preview title",
+    };
+
+    await expect(api.previewPost(post.id, body)).resolves.toEqual({
+      html: "<article>Preview</article>",
+    });
+
+    const [input, init] = fetcher.mock.calls[0] ?? [];
+    expect(input).toBe(`/api/v1/admin/posts/${post.id}/preview`);
+    expect(init?.method).toBe("POST");
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+    expect(new Headers(init?.headers).get("X-TinyCMS-Request")).toBe("1");
+    expect(new Headers(init?.headers).get("Origin")).toBe(null);
+    expect(init?.body).toBe(JSON.stringify(body));
+  });
+
   it("classifies only a 409 CONFLICT envelope as an actionable conflict", async () => {
     const conflictFetcher = vi.fn<Fetcher>(
       async () =>

@@ -3,6 +3,7 @@ import {
   type ButtonHTMLAttributes,
   Children,
   cloneElement,
+  forwardRef,
   type HTMLAttributes,
   type InputHTMLAttributes,
   type ReactElement,
@@ -17,26 +18,23 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
 };
 
-export function Button({
-  className,
-  disabled,
-  loading = false,
-  type = "button",
-  variant = "secondary",
-  ...props
-}: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { className, disabled, loading = false, type = "button", variant = "secondary", ...props },
+  ref,
+) {
   const classes = ["ui-button", `ui-button--${variant}`, className].filter(Boolean).join(" ");
 
   return (
     <button
       {...props}
+      ref={ref}
       type={type}
       disabled={disabled || loading}
       aria-busy={loading ? "true" : undefined}
       className={classes}
     />
   );
-}
+});
 
 export type InputProps = InputHTMLAttributes<HTMLInputElement>;
 

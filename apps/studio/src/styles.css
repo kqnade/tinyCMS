@@ -244,6 +244,13 @@ input[readonly] {
   font-size: var(--font-size-sm);
 }
 
+.studio-preview-button.ui-button {
+  min-height: 2.25rem;
+  padding: 0 var(--space-4);
+  border-radius: 999px;
+  font-size: var(--font-size-sm);
+}
+
 .studio-main {
   width: min(100% - 3rem, var(--editor-measure));
   margin: 0 auto;
@@ -594,6 +601,51 @@ input[readonly] {
   min-width: 0;
   flex: 1;
   overflow-y: auto;
+}
+
+.studio-preview {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  overflow-y: auto;
+  padding: clamp(2rem, 8vh, 6rem) var(--space-6);
+  background: var(--background);
+}
+
+.studio-preview__inner {
+  width: min(100%, 44rem);
+  margin: 0 auto;
+}
+
+.studio-preview__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-12);
+}
+
+.studio-preview__title {
+  margin: 0;
+  font-family: var(--font-editor);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.studio-preview__frame {
+  width: 100%;
+  min-height: calc(100vh - 12rem);
+  border: 0;
+  background: transparent;
+}
+
+.studio-preview__status {
+  color: var(--muted-foreground);
+  font-family: var(--font-editor);
+}
+
+.studio-preview__status--error {
+  color: var(--danger);
 }
 
 .studio-post-list,

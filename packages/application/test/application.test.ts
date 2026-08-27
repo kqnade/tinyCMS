@@ -86,6 +86,25 @@ function createRepositoryStub(
 }
 
 describe("editorial application", () => {
+  it("renders an unsaved preview without reading or writing the repository", async () => {
+    const application = createEditorialApplication({ repository: createRepositoryStub() });
+
+    const result = await application.previewPost({
+      title: "Preview <title>",
+      excerpt: "An & excerpt",
+      metadata: { seo: { description: "Preview description" } },
+      contentVersion: 1,
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Body & text" }] }],
+      },
+    });
+
+    expect(result.html).toBe(
+      '<article><header><h1>Preview &lt;title&gt;</h1><p class="preview-excerpt">An &amp; excerpt</p></header><p>Body &amp; text</p></article>',
+    );
+  });
+
   it("creates a normalized post and uses a stable fallback for non-ASCII titles", async () => {
     const repository = createRepositoryStub();
     const application = createEditorialApplication({

@@ -169,6 +169,9 @@ function createMockApi(overrides: Partial<EditorialApi> = {}): EditorialApi {
       items: [listItem(firstPost), listItem(secondPost)],
       nextCursor: null,
     })),
+    previewPost: vi.fn<EditorialApi["previewPost"]>(async (_postId, request) => ({
+      html: `<article><h1>${request.title}</h1><p>Preview body</p></article>`,
+    })),
     listMedia: vi.fn(async () => ({ items: [firstMedia], nextCursor: null })),
     getMedia: vi.fn(async () => firstMedia),
     getMediaOriginalUrl: vi.fn((mediaId) => `/api/v1/admin/media/${mediaId}/original`),
@@ -212,6 +215,58 @@ async function openStudioMenu() {
 }
 
 describe("Studio editorial workspace", () => {
+  it("previews the current in-memory draft without saving and can be dismissed", async () => {
+    const user = userEvent.setup();
+    const previewPost = vi.fn<EditorialApi["previewPost"]>(async (_postId, request) => ({
+      html: `<article><h1>${request.title}</h1><p>Preview body</p></article>`,
+    }));
+    const api = createMockApi({ previewPost });
+    render(<App api={api} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "Unsaved title" },
+    });
+    const previewButton = screen.getByRole("button", { name: "Preview" });
+    await user.click(previewButton);
+
+    await waitFor(() =>
+      expect(previewPost).toHaveBeenCalledWith(
+        firstId,
+        expect.objectContaining({
+          title: "Unsaved title",
+          contentVersion: 1,
+        }),
+      ),
+    );
+    const previewFrame = screen.getByTitle("Post preview");
+    expect(previewFrame.getAttribute("sandbox")).toBe("");
+    expect(previewFrame.getAttribute("srcdoc")).toContain("Unsaved title");
+    expect(api.saveDraft).not.toHaveBeenCalled();
+
+    const closeButton = screen.getByRole("button", { name: "Close preview" });
+    expect(document.activeElement).toBe(closeButton);
+    await user.click(closeButton);
+    expect(screen.queryByRole("dialog", { name: "Preview" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Title" })).toBeTruthy();
+    expect(document.activeElement).toBe(previewButton);
+  });
+
+  it("reports a preview request failure", async () => {
+    const user = userEvent.setup();
+    const api = createMockApi({
+      previewPost: vi.fn<EditorialApi["previewPost"]>(async () => {
+        throw new EditorialApiError(500, ErrorCode.INTERNAL_ERROR);
+      }),
+    });
+    render(<App api={api} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Preview unavailable");
+  });
+
   it("opens the Media panel through its enabled icon control", async () => {
     const api = createMockApi();
     render(<App api={api} />);

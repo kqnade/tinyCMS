@@ -1,7 +1,8 @@
 import { env, exports } from "cloudflare:workers";
+import type { EditorialApplication } from "@tinycms/application";
 import type { HonoJsonWebKey } from "hono/utils/jwt/jws";
 import { sign } from "hono/utils/jwt/jwt";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createEditorialApi, isEditorialConflict } from "../../studio/src/editorial-api";
 import { app, createAdminApp } from "../src/index";
 
@@ -82,6 +83,51 @@ async function requestRejectedBeforeJwks(assertion: string) {
 }
 
 describe("admin worker", () => {
+  it("renders a preview through the authenticated JSON write boundary", async () => {
+    const key = await createSigningKey("preview-route-key");
+    const previewPost = vi.fn<EditorialApplication["previewPost"]>(async (request) => ({
+      html: `<article><h1>${request.title}</h1><p>Preview</p></article>`,
+    }));
+    const application = createAdminApp({
+      application: { previewPost } as unknown as EditorialApplication,
+      now: () => NOW,
+      fetch: async () => new Response(JSON.stringify({ keys: [key.publicKey] }), { status: 200 }),
+    });
+    const assertion = await key.sign({
+      iss: ACCESS_ISSUER,
+      aud: ACCESS_AUDIENCE,
+      exp: NOW / 1000 + 300,
+    });
+    const request = {
+      title: "Preview title",
+      excerpt: null,
+      metadata: { seo: { description: "Preview" } },
+      contentVersion: 1,
+      content: { type: "doc", content: [] },
+    };
+
+    const response = await application.request(
+      "https://localhost/api/v1/admin/posts/0192f5a4-7b3c-7d1e-8f20-123456789abc/preview",
+      {
+        method: "POST",
+        headers: {
+          "Cf-Access-Jwt-Assertion": assertion,
+          "Content-Type": "application/json",
+          Origin: "https://localhost",
+          "X-TinyCMS-Request": "1",
+        },
+        body: JSON.stringify(request),
+      },
+      ACCESS_BINDINGS,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { html: "<article><h1>Preview title</h1><p>Preview</p></article>" },
+    });
+    expect(previewPost).toHaveBeenCalledWith(request);
+  });
+
   it("requires an Access assertion on the configured host", async () => {
     const response = await exports.default.fetch("https://localhost/healthz");
     const requestId = response.headers.get("X-Request-Id");

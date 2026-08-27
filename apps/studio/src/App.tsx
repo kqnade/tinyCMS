@@ -5,6 +5,7 @@ import type {
   PostListItemDto,
   PostRevisionDto,
   PostRevisionListItemDto,
+  PreviewPostRequest,
   SavePostDraftRequest,
 } from "@tinycms/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,8 +30,47 @@ export type AppProps = DraftSessionOptions & {
 };
 
 type WorkspaceState = "error" | "idle" | "loading" | "ready";
-type WorkspaceAction = "checkpoint" | "create" | "load" | "reload" | "restore" | "retry";
+type WorkspaceAction =
+  | "checkpoint"
+  | "create"
+  | "load"
+  | "preview"
+  | "reload"
+  | "restore"
+  | "retry";
 type Panel = "history" | "media" | "posts";
+type PreviewState =
+  | { readonly status: "error" }
+  | { readonly status: "loading" }
+  | { readonly html: string; readonly status: "ready" };
+
+const previewDocumentStyles = `
+:root { color-scheme: light dark; }
+body {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 0 1rem 4rem;
+  color: CanvasText;
+  background: Canvas;
+  font-family: "Zen Kaku Gothic Antique", sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.85;
+}
+h1 { margin: 0 0 1rem; font-size: clamp(2.25rem, 5vw, 3.25rem); font-weight: 400; letter-spacing: -0.045em; line-height: 1.1; overflow-wrap: anywhere; }
+h2, h3, blockquote, pre, ul, ol, table { margin-block: 1.1em; }
+p { margin-block: 0; }
+.preview-excerpt { margin-bottom: 2rem; color: GrayText; }
+ul, ol { padding-inline-start: 1.5em; }
+blockquote { margin-inline: 0; padding-inline-start: 1rem; border-inline-start: 3px solid GrayText; color: GrayText; }
+pre { overflow-x: auto; padding: 0.75rem 1rem; background: Field; font-family: monospace; font-size: 0.9rem; line-height: 1.7; }
+code { font-family: monospace; font-size: 0.9em; }
+:not(pre) > code { padding: 0.1em 0.3em; border-radius: 0.25rem; background: Field; }
+img { max-width: 100%; height: auto; }
+`;
+
+function previewDocument(html: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${previewDocumentStyles}</style></head><body>${html}</body></html>`;
+}
 
 const statusLabels: Record<DraftSaveState, string> = {
   conflict: "Conflict",
@@ -133,6 +173,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
   const [revisionCursor, setRevisionCursor] = useState<string | null>(null);
   const [historyState, setHistoryState] = useState<WorkspaceState>("idle");
   const [editorVersion, setEditorVersion] = useState(0);
+  const [previewState, setPreviewState] = useState<PreviewState | null>(null);
   const selectedPostIdRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
   const startedApiRef = useRef<EditorialApi | null>(null);
@@ -141,6 +182,8 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
   const editorRef = useRef<StudioEditorHandle | null>(null);
   const mediaToggleRef = useRef<HTMLButtonElement | null>(null);
   const mediaSectionRef = useRef<HTMLElement | null>(null);
+  const previewButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previewCloseButtonRef = useRef<HTMLButtonElement | null>(null);
 
   selectedPostIdRef.current = selectedPostId;
 
@@ -444,6 +487,47 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
     setWorkspaceAction(null);
   }, [loadPost, selectedPostId, workspaceAction]);
 
+  const previewPost = useCallback(async () => {
+    if (api === undefined || selectedPost === null || workspaceAction !== null) return;
+    setWorkspaceAction("preview");
+    setPreviewState({ status: "loading" });
+    const snapshot = session.getSnapshot();
+    const request: PreviewPostRequest = {
+      content: snapshot.content.content,
+      contentVersion: snapshot.content.contentVersion,
+      ...(snapshot.excerpt === undefined ? {} : { excerpt: snapshot.excerpt }),
+      ...(snapshot.metadata === undefined
+        ? {}
+        : { metadata: snapshot.metadata as unknown as ContractJsonObject }),
+      title: snapshot.title,
+    };
+    try {
+      const result = await api.previewPost(selectedPost.id, request);
+      setPreviewState({ html: result.html, status: "ready" });
+    } catch {
+      setPreviewState({ status: "error" });
+    } finally {
+      setWorkspaceAction(null);
+    }
+  }, [api, selectedPost, session, workspaceAction]);
+
+  const previewOpen = previewState !== null;
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    previewCloseButtonRef.current?.focus();
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setPreviewState(null);
+    };
+    window.addEventListener("keydown", closeFromEscape);
+    return () => {
+      window.removeEventListener("keydown", closeFromEscape);
+      previewButtonRef.current?.focus();
+    };
+  }, [previewOpen]);
+
   const canSave =
     Boolean(persistence) &&
     (session.saveState === "dirty" ||
@@ -517,6 +601,16 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
               variant="ghost"
             >
               <MaterialSymbol name="save" />
+            </Button>
+            <Button
+              aria-label="Preview"
+              className="studio-preview-button"
+              disabled={api === undefined || selectedPost === null || workspaceAction !== null}
+              onClick={() => void previewPost()}
+              ref={previewButtonRef}
+              variant="secondary"
+            >
+              Preview
             </Button>
             <Button
               aria-label="Publish"
@@ -728,6 +822,40 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
           </div>
         </section>
       </main>
+      {previewState !== null ? (
+        <div aria-label="Preview" aria-modal="true" className="studio-preview" role="dialog">
+          <div className="studio-preview__inner">
+            <div className="studio-preview__header">
+              <h2 className="studio-preview__title">Preview</h2>
+              <Button
+                aria-label="Close preview"
+                className="studio-icon-button"
+                onClick={() => setPreviewState(null)}
+                ref={previewCloseButtonRef}
+                variant="ghost"
+              >
+                <MaterialSymbol name="close" />
+              </Button>
+            </div>
+            {previewState.status === "loading" ? (
+              <p aria-label="Loading preview" className="studio-preview__status" role="status">
+                Loading preview…
+              </p>
+            ) : previewState.status === "error" ? (
+              <p className="studio-preview__status studio-preview__status--error" role="alert">
+                Preview unavailable. Try again.
+              </p>
+            ) : (
+              <iframe
+                className="studio-preview__frame"
+                sandbox=""
+                srcDoc={previewDocument(previewState.html)}
+                title="Post preview"
+              />
+            )}
+          </div>
+        </div>
+      ) : null}
       <ThemeToggle />
     </div>
   );

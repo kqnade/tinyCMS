@@ -1,4 +1,4 @@
-import { type ContentDocument, validateContentDocument } from "@tinycms/content";
+import { renderHtml, type ContentDocument, validateContentDocument } from "@tinycms/content";
 import {
   type CheckpointPostRevisionRequest,
   type CreatePostRequest,
@@ -12,6 +12,8 @@ import {
   type PostRevisionListItemDto,
   type PostRevisionListQuery,
   parseUuidV7,
+  type PreviewPostRequest,
+  type PreviewPostResultDto,
   type RestorePostRevisionRequest,
   type SavePostDraftRequest,
 } from "@tinycms/contracts";
@@ -96,6 +98,7 @@ export type EditorialApplicationDependencies = {
 export type EditorialApplication = {
   createPost(request: CreatePostRequest, identity: AccessIdentity): Promise<PostDto>;
   getPost(postId: string): Promise<PostDto>;
+  previewPost(request: PreviewPostRequest): Promise<PreviewPostResultDto>;
   listPosts(query: PostListQuery): Promise<CursorPage<PostListItemDto>>;
   saveDraft(
     postId: string,
@@ -206,6 +209,25 @@ function normalizeContent(
     content: result.value,
     contentJson: JSON.stringify(result.value),
   };
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll(/[&<>'"]/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case "'":
+        return "&#39;";
+      case '"':
+        return "&quot;";
+      default:
+        return character;
+    }
+  });
 }
 
 function parseStoredJson(value: string, resource: string): unknown {
@@ -530,6 +552,20 @@ export function createEditorialApplication(
     return { post: await readPost(postId), revision: mapRevision(result.revision) };
   };
 
+  const previewPost = async (request: PreviewPostRequest): Promise<PreviewPostResultDto> => {
+    const normalized = normalizeContent(request.contentVersion, request.content);
+    const excerpt =
+      request.excerpt === undefined || request.excerpt === null || request.excerpt.length === 0
+        ? ""
+        : `<p class="preview-excerpt">${escapeHtml(request.excerpt)}</p>`;
+    const html = renderHtml(normalized.contentVersion, normalized.content, {
+      resolveMediaUrl: (mediaId) => `/api/v1/admin/media/${mediaId}/original`,
+    });
+    return {
+      html: `<article><header><h1>${escapeHtml(request.title)}</h1>${excerpt}</header>${html}</article>`,
+    };
+  };
+
   const listPosts = async (query: PostListQuery): Promise<CursorPage<PostListItemDto>> => {
     const limit = pageLimit(query.limit);
     const cursor = query.cursor === undefined ? undefined : decodeCursor(query.cursor, "posts");
@@ -606,6 +642,7 @@ export function createEditorialApplication(
   return {
     createPost,
     getPost: readPost,
+    previewPost,
     listPosts,
     saveDraft,
     checkpointRevision,

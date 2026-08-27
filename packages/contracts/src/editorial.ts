@@ -112,6 +112,12 @@ export type SavePostDraftRequest = {
   metadata?: JsonObject;
 } & EditorContentDto;
 
+export type PreviewPostRequest = {
+  title: string;
+  excerpt?: string | null;
+  metadata?: JsonObject;
+} & EditorContentDto;
+
 export type CheckpointPostRevisionRequest = {
   expectedDraftVersion: number;
   expectedRevisionVersion: number;
@@ -134,6 +140,12 @@ export type CreatePostResponse = SuccessResponse<PostDto>;
 export type ReadPostResponse = SuccessResponse<PostDto>;
 
 export type SavePostDraftResponse = SuccessResponse<PostDto>;
+
+export type PreviewPostResultDto = {
+  html: string;
+};
+
+export type PreviewPostResponse = SuccessResponse<PreviewPostResultDto>;
 
 export type CheckpointPostRevisionResponse = SuccessResponse<PostRevisionWriteResultDto>;
 
