@@ -96,6 +96,13 @@ export interface PreparePublicationInput extends CheckpointDraftInput {
   idempotencyKey: string;
 }
 
+export interface CompletePublicationInput {
+  publicationJobId: string;
+  postId: string;
+  revisionId: string;
+  completedAt: number;
+}
+
 export interface AppendRevisionInput {
   postId: string;
   authorId: string;
@@ -159,6 +166,11 @@ export interface PreparedPublication {
   job: PublicationJob;
 }
 
+export interface CompletedPublication {
+  post: Post;
+  job: PublicationJob;
+}
+
 export interface PostAggregate {
   post: Post;
   revisions: PostRevision[];
@@ -176,6 +188,7 @@ export interface EditorialRepository {
   saveDraft(input: SaveDraftInput): Promise<PostDraft>;
   checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
   preparePublication(input: PreparePublicationInput): Promise<PreparedPublication>;
+  completePublication(input: CompletePublicationInput): Promise<CompletedPublication>;
   getAuthor(id: string): Promise<Author>;
   getAuthorByAccessSubject(accessSubject: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
@@ -637,6 +650,127 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       throw new RepositoryError(
         RepositoryErrorCode.WRITE_FAILED,
         "Failed to prepare publication",
+        cause,
+      );
+    }
+  };
+
+  const completePublication = async ({
+    publicationJobId,
+    postId,
+    revisionId,
+    completedAt,
+  }: CompletePublicationInput): Promise<CompletedPublication> => {
+    const readCompleted = async (): Promise<CompletedPublication | null> => {
+      const job = await database
+        .prepare(
+          `SELECT id, idempotency_key AS "idempotencyKey", post_id AS "postId",
+             revision_id AS "revisionId", state, attempts, error_message AS "errorMessage",
+             available_at AS "availableAt", started_at AS "startedAt",
+             completed_at AS "completedAt", created_at AS "createdAt", updated_at AS "updatedAt"
+           FROM publication_jobs
+           WHERE id = ?`,
+        )
+        .bind(publicationJobId)
+        .first<PublicationJob>();
+      if (job === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "publication job was not found");
+      }
+      if (job.postId !== postId || job.revisionId !== revisionId) {
+        throw new RepositoryError(
+          RepositoryErrorCode.CONFLICT,
+          "Publication job does not match the requested revision",
+        );
+      }
+      if (job.state !== "succeeded") {
+        return null;
+      }
+      const post = await database
+        .prepare(
+          `SELECT id, slug, status, active_published_revision_id AS "activePublishedRevisionId",
+             scheduled_at AS "scheduledAt", canonical_url AS "canonicalUrl", noindex,
+             created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"
+           FROM posts
+           WHERE id = ? AND active_published_revision_id = ?`,
+        )
+        .bind(postId, revisionId)
+        .first<Post>();
+      if (post === null) {
+        throw new Error("Completed publication is not active on its post");
+      }
+      return { post, job };
+    };
+
+    try {
+      const completed = await readCompleted();
+      if (completed !== null) {
+        return completed;
+      }
+
+      const [jobResult, postResult] = await database.batch([
+        database
+          .prepare(
+            `UPDATE publication_jobs
+             SET state = 'succeeded', attempts = attempts + 1,
+               started_at = COALESCE(started_at, ?), completed_at = ?,
+               error_message = NULL, updated_at = ?
+             WHERE id = ? AND post_id = ? AND revision_id = ?
+               AND state IN ('pending', 'running')
+             RETURNING id, idempotency_key AS "idempotencyKey", post_id AS "postId",
+               revision_id AS "revisionId", state, attempts, error_message AS "errorMessage",
+               available_at AS "availableAt", started_at AS "startedAt",
+               completed_at AS "completedAt", created_at AS "createdAt", updated_at AS "updatedAt"`,
+          )
+          .bind(completedAt, completedAt, completedAt, publicationJobId, postId, revisionId),
+        database
+          .prepare(
+            `UPDATE posts
+             SET status = 'published', active_published_revision_id = ?,
+               scheduled_at = NULL, updated_at = ?
+             WHERE id = ?
+               AND EXISTS (
+                 SELECT 1 FROM publication_jobs
+                 WHERE id = ? AND post_id = posts.id AND revision_id = ?
+                   AND state = 'succeeded'
+               )
+             RETURNING id, slug, status,
+               active_published_revision_id AS "activePublishedRevisionId",
+               scheduled_at AS "scheduledAt", canonical_url AS "canonicalUrl", noindex,
+               created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`,
+          )
+          .bind(revisionId, completedAt, postId, publicationJobId, revisionId),
+      ]);
+      const job = jobResult?.results[0] as PublicationJob | undefined;
+      const post = postResult?.results[0] as Post | undefined;
+      if (
+        jobResult?.meta.changes === 1 &&
+        job !== undefined &&
+        postResult?.meta.changes === 1 &&
+        post !== undefined
+      ) {
+        return { post, job };
+      }
+      if (
+        jobResult?.meta.changes === 1 ||
+        job !== undefined ||
+        postResult?.meta.changes === 1 ||
+        post !== undefined
+      ) {
+        throw new Error("Publication completion statements returned a partial result");
+      }
+
+      const retried = await readCompleted();
+      if (retried !== null) {
+        return retried;
+      }
+      throw new RepositoryError(RepositoryErrorCode.CONFLICT, "Publication job is not completable");
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to complete publication",
         cause,
       );
     }
@@ -1340,6 +1474,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     saveDraft,
     checkpointDraft,
     preparePublication,
+    completePublication,
     getAuthor,
     getAuthorByAccessSubject,
     getPost,

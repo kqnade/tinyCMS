@@ -96,4 +96,70 @@ describe("editorial repository publication preparation", () => {
         .first<{ count: number }>(),
     ).resolves.toEqual({ count: 1 });
   });
+
+  it("activates the prepared revision only after publication completes", async () => {
+    const repository = createEditorialRepository(env.TEST_DB);
+    const initial = await repository.createAuthorPostRevision({
+      author: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d41101",
+        accessSubject: "subject-publication-complete",
+        displayName: "Publication Completion Author",
+        createdAt: 1_700_000_021_000,
+        updatedAt: 1_700_000_021_000,
+      },
+      post: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d41102",
+        slug: "publication-complete",
+        createdAt: 1_700_000_021_001,
+        updatedAt: 1_700_000_021_001,
+      },
+      revision: {
+        id: "018f0e5d-6a25-7b01-8f4a-7d62a5d41103",
+        version: 1,
+        title: "Initial completion snapshot",
+        contentVersion: 1,
+        contentJson: '{"type":"doc","content":[]}',
+        createdAt: 1_700_000_021_002,
+      },
+    });
+    const prepared = await repository.preparePublication({
+      postId: initial.post.id,
+      expectedDraftVersion: 1,
+      expectedRevisionVersion: initial.revision.version,
+      revisionId: "018f0e5d-6a25-7b01-8f4a-7d62a5d41104",
+      publicationJobId: "018f0e5d-6a25-7b01-8f4a-7d62a5d41105",
+      idempotencyKey: "publish-publication-complete-1",
+      authorId: initial.author.id,
+      createdAt: 1_700_000_021_003,
+    });
+    await expect(repository.getPost(initial.post.id)).resolves.toMatchObject({
+      status: "draft",
+      activePublishedRevisionId: null,
+    });
+    const request = {
+      publicationJobId: prepared.job.id,
+      postId: initial.post.id,
+      revisionId: prepared.revision.id,
+      completedAt: 1_700_000_021_004,
+    };
+
+    const completed = await repository.completePublication(request);
+    const retry = await repository.completePublication(request);
+
+    expect(completed.post).toMatchObject({
+      id: initial.post.id,
+      status: "published",
+      activePublishedRevisionId: prepared.revision.id,
+      updatedAt: request.completedAt,
+    });
+    expect(completed.job).toMatchObject({
+      id: prepared.job.id,
+      state: "succeeded",
+      attempts: 1,
+      startedAt: request.completedAt,
+      completedAt: request.completedAt,
+      updatedAt: request.completedAt,
+    });
+    expect(retry).toEqual(completed);
+  });
 });
