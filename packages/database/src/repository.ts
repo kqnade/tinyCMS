@@ -1,6 +1,14 @@
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { authors, postDrafts, postRevisions, posts, schema, type searchChunks } from "./schema";
+import {
+  authors,
+  postDrafts,
+  postRevisions,
+  posts,
+  publicationJobs,
+  schema,
+  type searchChunks,
+} from "./schema";
 
 export const MAX_SEARCH_QUERY_LENGTH = 256;
 
@@ -8,6 +16,7 @@ export type Author = typeof authors.$inferSelect;
 export type Post = typeof posts.$inferSelect;
 export type PostRevision = typeof postRevisions.$inferSelect;
 export type PostDraft = typeof postDrafts.$inferSelect;
+export type PublicationJob = typeof publicationJobs.$inferSelect;
 export type SearchChunk = typeof searchChunks.$inferSelect;
 
 export const RepositoryErrorCode = {
@@ -82,6 +91,11 @@ export interface CheckpointDraftInput {
   createdAt: number;
 }
 
+export interface PreparePublicationInput extends CheckpointDraftInput {
+  publicationJobId: string;
+  idempotencyKey: string;
+}
+
 export interface AppendRevisionInput {
   postId: string;
   authorId: string;
@@ -140,6 +154,11 @@ export interface RestoredDraft {
   revision: PostRevision;
 }
 
+export interface PreparedPublication {
+  revision: PostRevision;
+  job: PublicationJob;
+}
+
 export interface PostAggregate {
   post: Post;
   revisions: PostRevision[];
@@ -156,6 +175,7 @@ export interface EditorialRepository {
   restoreDraft(input: RestoreDraftInput): Promise<RestoredDraft>;
   saveDraft(input: SaveDraftInput): Promise<PostDraft>;
   checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
+  preparePublication(input: PreparePublicationInput): Promise<PreparedPublication>;
   getAuthor(id: string): Promise<Author>;
   getAuthorByAccessSubject(accessSubject: string): Promise<Author>;
   getPost(id: string): Promise<Post>;
@@ -441,6 +461,182 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
       throw new RepositoryError(
         RepositoryErrorCode.WRITE_FAILED,
         "Failed to checkpoint post draft",
+        cause,
+      );
+    }
+  };
+
+  const preparePublication = async ({
+    postId,
+    expectedDraftVersion,
+    expectedRevisionVersion,
+    revisionId,
+    publicationJobId,
+    idempotencyKey,
+    authorId,
+    createdAt,
+  }: PreparePublicationInput): Promise<PreparedPublication> => {
+    const readExisting = async (): Promise<PreparedPublication | null> => {
+      const job = await database
+        .prepare(
+          `SELECT id, idempotency_key AS "idempotencyKey", post_id AS "postId",
+             revision_id AS "revisionId", state, attempts, error_message AS "errorMessage",
+             available_at AS "availableAt", started_at AS "startedAt",
+             completed_at AS "completedAt", created_at AS "createdAt", updated_at AS "updatedAt"
+           FROM publication_jobs
+           WHERE idempotency_key = ?`,
+        )
+        .bind(idempotencyKey)
+        .first<PublicationJob>();
+      if (job === null) {
+        return null;
+      }
+      if (job.postId !== postId) {
+        throw new RepositoryError(
+          RepositoryErrorCode.CONFLICT,
+          "Publication idempotency key belongs to another post",
+        );
+      }
+      const revision = await database
+        .prepare(
+          `SELECT id, post_id AS "postId", version, title,
+             content_version AS "contentVersion", content_json AS "contentJson", excerpt,
+             metadata_json AS "metadataJson", author_id AS "authorId", created_at AS "createdAt"
+           FROM post_revisions
+           WHERE id = ? AND post_id = ?`,
+        )
+        .bind(job.revisionId, postId)
+        .first<PostRevision>();
+      if (revision === null) {
+        throw new Error("Publication job revision was not found");
+      }
+      return { revision, job };
+    };
+
+    try {
+      const existing = await readExisting();
+      if (existing !== null) {
+        return existing;
+      }
+
+      const [postResult, revisionResult, jobResult] = await database.batch([
+        database
+          .prepare(
+            `UPDATE posts
+             SET updated_at = ?
+             WHERE id = ?
+               AND EXISTS (
+                 SELECT 1
+                 FROM post_drafts AS draft
+                 JOIN (
+                   SELECT post_id, MAX(version) AS version
+                   FROM post_revisions
+                   WHERE post_id = ?
+                   GROUP BY post_id
+                 ) AS current ON current.post_id = draft.post_id
+                 WHERE draft.post_id = posts.id
+                   AND draft.version = ?
+                   AND current.version = ?
+               )`,
+          )
+          .bind(createdAt, postId, postId, expectedDraftVersion, expectedRevisionVersion),
+        database
+          .prepare(
+            `INSERT INTO post_revisions (
+               id, post_id, version, title, content_version, content_json,
+               excerpt, metadata_json, author_id, created_at
+             )
+             SELECT ?, draft.post_id, current.version + 1, draft.title,
+               draft.content_version, draft.content_json, draft.excerpt,
+               draft.metadata_json, ?, ?
+             FROM post_drafts AS draft
+             JOIN (
+               SELECT post_id, MAX(version) AS version
+               FROM post_revisions
+               WHERE post_id = ?
+               GROUP BY post_id
+             ) AS current ON current.post_id = draft.post_id
+             WHERE draft.post_id = ?
+               AND draft.version = ?
+               AND current.version = ?
+             RETURNING id, post_id AS "postId", version, title,
+               content_version AS "contentVersion", content_json AS "contentJson",
+               excerpt, metadata_json AS "metadataJson", author_id AS "authorId",
+               created_at AS "createdAt"`,
+          )
+          .bind(
+            revisionId,
+            authorId,
+            createdAt,
+            postId,
+            postId,
+            expectedDraftVersion,
+            expectedRevisionVersion,
+          ),
+        database
+          .prepare(
+            `INSERT INTO publication_jobs (
+               id, idempotency_key, post_id, revision_id, state, created_at, updated_at
+             )
+             SELECT ?, ?, post_id, id, 'pending', ?, ?
+             FROM post_revisions
+             WHERE id = ? AND post_id = ?
+             RETURNING id, idempotency_key AS "idempotencyKey", post_id AS "postId",
+               revision_id AS "revisionId", state, attempts, error_message AS "errorMessage",
+               available_at AS "availableAt", started_at AS "startedAt",
+               completed_at AS "completedAt", created_at AS "createdAt", updated_at AS "updatedAt"`,
+          )
+          .bind(publicationJobId, idempotencyKey, createdAt, createdAt, revisionId, postId),
+      ]);
+      const revision = revisionResult?.results[0] as PostRevision | undefined;
+      const job = jobResult?.results[0] as PublicationJob | undefined;
+      if (
+        postResult?.meta.changes === 1 &&
+        revisionResult?.meta.changes === 1 &&
+        revision !== undefined &&
+        jobResult?.meta.changes === 1 &&
+        job !== undefined
+      ) {
+        return { revision, job };
+      }
+      if (
+        postResult?.meta.changes === 1 ||
+        revisionResult?.meta.changes === 1 ||
+        revision !== undefined ||
+        jobResult?.meta.changes === 1 ||
+        job !== undefined
+      ) {
+        throw new Error("Publication preparation statements returned a partial result");
+      }
+
+      const draft = await database
+        .prepare('SELECT post_id AS "postId" FROM post_drafts WHERE post_id = ?')
+        .bind(postId)
+        .first<{ postId: string }>();
+      if (draft === null) {
+        throw new RepositoryError(RepositoryErrorCode.NOT_FOUND, "post draft was not found");
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.CONFLICT,
+        "Publication preparation conflicted with a newer version",
+      );
+    } catch (cause) {
+      if (cause instanceof RepositoryError) {
+        throw cause;
+      }
+      try {
+        const existing = await readExisting();
+        if (existing !== null) {
+          return existing;
+        }
+      } catch (readCause) {
+        if (readCause instanceof RepositoryError) {
+          throw readCause;
+        }
+      }
+      throw new RepositoryError(
+        RepositoryErrorCode.WRITE_FAILED,
+        "Failed to prepare publication",
         cause,
       );
     }
@@ -1143,6 +1339,7 @@ export function createEditorialRepository(database: D1Database): EditorialReposi
     restoreDraft,
     saveDraft,
     checkpointDraft,
+    preparePublication,
     getAuthor,
     getAuthorByAccessSubject,
     getPost,
