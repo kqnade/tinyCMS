@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createEditorialApplication, type EditorialRepositoryPort } from "../src";
 
 const emptyDocument = { type: "doc", content: [] } as const;
@@ -58,6 +58,18 @@ function createRepositoryStub(
       void input;
       return unavailable("checkpointDraft");
     },
+    preparePublication: async (input) => {
+      void input;
+      return unavailable("preparePublication");
+    },
+    completePublication: async (input) => {
+      void input;
+      return unavailable("completePublication");
+    },
+    failPublication: async (input) => {
+      void input;
+      return unavailable("failPublication");
+    },
     restoreDraft: async (input) => {
       void input;
       return unavailable("restoreDraft");
@@ -103,6 +115,137 @@ describe("editorial application", () => {
     expect(result.html).toBe(
       '<article><header><h1>Preview &lt;title&gt;</h1><p class="preview-excerpt">An &amp; excerpt</p></header><p>Body &amp; text</p></article>',
     );
+  });
+
+  it("writes immutable HTML and Markdown before activating a publication", async () => {
+    const postId = "0192f5a4-7b3c-7d1e-8f20-123456789ac1";
+    const authorId = "0192f5a4-7b3c-7d1e-8f20-123456789ac2";
+    const revisionId = "0192f5a4-7b3c-7d1e-8f20-123456789ac3";
+    const publicationJobId = "0192f5a4-7b3c-7d1e-8f20-123456789ac4";
+    const timestamp = 1_700_000_030_000;
+    const draft = {
+      postId,
+      version: 2,
+      title: "Published <title>",
+      contentVersion: 1,
+      contentJson:
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Published body"}]}]}',
+      excerpt: "A concise excerpt",
+      metadataJson: "{}",
+      authorId,
+      updatedAt: timestamp - 1,
+    };
+    const revision = {
+      id: revisionId,
+      postId,
+      version: 4,
+      title: draft.title,
+      contentVersion: draft.contentVersion,
+      contentJson: draft.contentJson,
+      excerpt: draft.excerpt,
+      metadataJson: draft.metadataJson,
+      authorId,
+      createdAt: timestamp,
+    };
+    const job = {
+      id: publicationJobId,
+      idempotencyKey: "publish-request-1",
+      postId,
+      revisionId,
+      state: "pending",
+      attempts: 0,
+      errorMessage: null,
+      availableAt: null,
+      startedAt: null,
+      completedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const publishedPost = {
+      id: postId,
+      slug: "published-title",
+      status: "published",
+      activePublishedRevisionId: revisionId,
+      scheduledAt: null,
+      canonicalUrl: null,
+      noindex: 0,
+      createdBy: authorId,
+      createdAt: timestamp - 10,
+      updatedAt: timestamp,
+    };
+    const repository = Object.assign(createRepositoryStub(), {
+      upsertAuthorByAccessSubject: vi.fn(async () => ({
+        id: authorId,
+        accessSubject: "publisher",
+        displayName: "Publisher",
+        email: null,
+        avatarUrl: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })),
+      preparePublication: vi.fn(async () => ({ revision, job })),
+      completePublication: vi.fn(async () => ({
+        post: publishedPost,
+        job: {
+          ...job,
+          state: "succeeded",
+          attempts: 1,
+          startedAt: timestamp,
+          completedAt: timestamp,
+        },
+      })),
+      failPublication: vi.fn(),
+      getPost: vi.fn(async () => publishedPost),
+      getDraft: vi.fn(async () => draft),
+      getLatestRevisionVersion: vi.fn(async () => revision.version),
+    });
+    const artifactStore = { put: vi.fn(async () => {}) };
+    const identifiers = [authorId, revisionId, publicationJobId];
+    const application = createEditorialApplication({
+      repository,
+      artifactStore,
+      now: () => timestamp,
+      uuidv7: () => identifiers.shift() as string,
+    } as never);
+
+    const result = await application.publishPost(
+      postId,
+      {
+        expectedDraftVersion: draft.version,
+        expectedRevisionVersion: revision.version - 1,
+        idempotencyKey: job.idempotencyKey,
+      },
+      { subject: "publisher", displayName: "Publisher" },
+    );
+
+    const htmlPath = `posts/${postId}/revisions/${revisionId}.html`;
+    const markdownPath = `posts/${postId}/revisions/${revisionId}.md`;
+    expect(artifactStore.put.mock.calls).toEqual([
+      [
+        htmlPath,
+        '<article><header><h1>Published &lt;title&gt;</h1><p class="article-excerpt">A concise excerpt</p></header><p>Published body</p></article>',
+        {
+          contentType: "text/html; charset=utf-8",
+          cacheControl: "public, max-age=31536000, immutable",
+        },
+      ],
+      [
+        markdownPath,
+        "# Published &lt;title&gt;\n\nA concise excerpt\n\nPublished body\n",
+        {
+          contentType: "text/markdown; charset=utf-8",
+          cacheControl: "public, max-age=31536000, immutable",
+        },
+      ],
+    ]);
+    expect(repository.completePublication).toHaveBeenCalledAfter(artifactStore.put);
+    expect(result).toMatchObject({
+      publicationJobId,
+      htmlPath,
+      markdownPath,
+      post: { id: postId, lifecycle: "published", currentRevisionVersion: revision.version },
+      revision: { id: revisionId, revisionVersion: revision.version },
+    });
   });
 
   it("creates a normalized post and uses a stable fallback for non-ASCII titles", async () => {

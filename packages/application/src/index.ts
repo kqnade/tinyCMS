@@ -1,4 +1,9 @@
-import { renderHtml, type ContentDocument, validateContentDocument } from "@tinycms/content";
+import {
+  renderHtml,
+  renderMarkdown,
+  type ContentDocument,
+  validateContentDocument,
+} from "@tinycms/content";
 import {
   type CheckpointPostRevisionRequest,
   type CreatePostRequest,
@@ -14,18 +19,25 @@ import {
   parseUuidV7,
   type PreviewPostRequest,
   type PreviewPostResultDto,
+  type PublishPostRequest,
+  type PublishPostResultDto,
   type RestorePostRevisionRequest,
   type SavePostDraftRequest,
 } from "@tinycms/contracts";
 import {
   type Author,
   type CheckpointDraftInput,
+  type CompletePublicationInput,
   type CreateAuthorInput,
   type CreatedAuthorPostRevision,
   type CreatePostWithAuthorInput,
+  type FailPublicationInput,
   type Post,
   type PostDraft,
   type PostRevision,
+  type PreparePublicationInput,
+  type PreparedPublication,
+  type PublicationJob,
   RepositoryError,
   RepositoryErrorCode,
   type RestoreDraftInput,
@@ -77,6 +89,11 @@ export interface EditorialRepositoryPort {
   upsertAuthorByAccessSubject(input: CreateAuthorInput): Promise<Author>;
   saveDraft(input: SaveDraftInput): Promise<PostDraft>;
   checkpointDraft(input: CheckpointDraftInput): Promise<PostRevision>;
+  preparePublication(input: PreparePublicationInput): Promise<PreparedPublication>;
+  completePublication(
+    input: CompletePublicationInput,
+  ): Promise<{ post: Post; job: PublicationJob }>;
+  failPublication(input: FailPublicationInput): Promise<PublicationJob>;
   restoreDraft(input: RestoreDraftInput): Promise<{ draft: PostDraft; revision: PostRevision }>;
   getPost(id: string): Promise<Post>;
   getDraft(postId: string): Promise<PostDraft>;
@@ -89,8 +106,22 @@ export interface EditorialRepositoryPort {
   }): Promise<PostRevision[]>;
 }
 
+export type PublicationArtifactWriteOptions = {
+  readonly contentType: string;
+  readonly cacheControl: string;
+};
+
+export type PublicationArtifactStorePort = {
+  readonly put: (
+    key: string,
+    value: string,
+    options: PublicationArtifactWriteOptions,
+  ) => Promise<void>;
+};
+
 export type EditorialApplicationDependencies = {
   readonly repository: EditorialRepositoryPort;
+  readonly artifactStore?: PublicationArtifactStorePort;
   readonly now?: () => number;
   readonly uuidv7?: () => string;
 };
@@ -99,6 +130,11 @@ export type EditorialApplication = {
   createPost(request: CreatePostRequest, identity: AccessIdentity): Promise<PostDto>;
   getPost(postId: string): Promise<PostDto>;
   previewPost(request: PreviewPostRequest): Promise<PreviewPostResultDto>;
+  publishPost(
+    postId: string,
+    request: PublishPostRequest,
+    identity: AccessIdentity,
+  ): Promise<PublishPostResultDto>;
   listPosts(query: PostListQuery): Promise<CursorPage<PostListItemDto>>;
   saveDraft(
     postId: string,
@@ -126,6 +162,7 @@ const DEFAULT_DOCUMENT: ContentDocument = { type: "doc", content: [] };
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 100;
 const CURSOR_VERSION = 1;
+const IMMUTABLE_ARTIFACT_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
 type PostCursor = {
   readonly kind: "posts";
@@ -228,6 +265,42 @@ function escapeHtml(value: string): string {
         return character;
     }
   });
+}
+
+function publicationArtifactPaths(postId: string, revisionId: string) {
+  const prefix = `posts/${postId}/revisions/${revisionId}`;
+  return { htmlPath: `${prefix}.html`, markdownPath: `${prefix}.md` };
+}
+
+function renderPublicationArtifacts(revision: PostRevision): { html: string; markdown: string } {
+  const content = storedContent(revision.contentVersion, revision.contentJson);
+  const resolveMediaUrl = (mediaId: string) => `/media/${encodeURIComponent(mediaId)}`;
+  const excerptHtml =
+    revision.excerpt === null || revision.excerpt.length === 0
+      ? ""
+      : `<p class="article-excerpt">${escapeHtml(revision.excerpt)}</p>`;
+  const html = `<article><header><h1>${escapeHtml(revision.title)}</h1>${excerptHtml}</header>${renderHtml(revision.contentVersion, content, { resolveMediaUrl })}</article>`;
+  const markdownContent: ContentDocument = {
+    type: "doc",
+    content: [
+      {
+        type: "heading",
+        attrs: { level: 1 },
+        content: revision.title.length === 0 ? [] : [{ type: "text", text: revision.title }],
+      },
+      ...(revision.excerpt === null || revision.excerpt.length === 0
+        ? []
+        : [
+            {
+              type: "paragraph" as const,
+              content: [{ type: "text" as const, text: revision.excerpt }],
+            },
+          ]),
+      ...content.content,
+    ],
+  };
+  const markdown = `${renderMarkdown(revision.contentVersion, markdownContent, { resolveMediaUrl })}\n`;
+  return { html, markdown };
 }
 
 function parseStoredJson(value: string, resource: string): unknown {
@@ -413,6 +486,7 @@ export function createEditorialApplication(
   const now = dependencies.now ?? defaultNow;
   const uuidv7 = dependencies.uuidv7 ?? defaultUuidv7;
   const repository = dependencies.repository;
+  const artifactStore = dependencies.artifactStore;
 
   const readPost = (postId: string): Promise<PostDto> =>
     withRepositoryErrors(async () => {
@@ -566,6 +640,81 @@ export function createEditorialApplication(
     };
   };
 
+  const publishPost = async (
+    postId: string,
+    request: PublishPostRequest,
+    identity: AccessIdentity,
+  ): Promise<PublishPostResultDto> => {
+    if (artifactStore === undefined) {
+      throw new ApplicationError(
+        ApplicationErrorCode.INTERNAL_ERROR,
+        "Publication artifact store is unavailable",
+      );
+    }
+    const timestamp = now();
+    const author = await ensureAuthor(identity, timestamp);
+    const prepared = await withRepositoryErrors(() =>
+      repository.preparePublication({
+        postId,
+        expectedDraftVersion: request.expectedDraftVersion,
+        expectedRevisionVersion: request.expectedRevisionVersion,
+        revisionId: uuidv7(),
+        publicationJobId: uuidv7(),
+        idempotencyKey: request.idempotencyKey,
+        authorId: author.id,
+        createdAt: timestamp,
+      }),
+    );
+    const paths = publicationArtifactPaths(postId, prepared.revision.id);
+
+    if (prepared.job.state !== "succeeded") {
+      if (prepared.job.state === "failed") {
+        throw new ApplicationError(
+          ApplicationErrorCode.CONFLICT,
+          "Publication request already failed",
+        );
+      }
+      const artifacts = renderPublicationArtifacts(prepared.revision);
+      try {
+        await artifactStore.put(paths.htmlPath, artifacts.html, {
+          contentType: "text/html; charset=utf-8",
+          cacheControl: IMMUTABLE_ARTIFACT_CACHE_CONTROL,
+        });
+        await artifactStore.put(paths.markdownPath, artifacts.markdown, {
+          contentType: "text/markdown; charset=utf-8",
+          cacheControl: IMMUTABLE_ARTIFACT_CACHE_CONTROL,
+        });
+      } catch {
+        await withRepositoryErrors(() =>
+          repository.failPublication({
+            publicationJobId: prepared.job.id,
+            postId,
+            revisionId: prepared.revision.id,
+            errorMessage: "Failed to write publication artifacts",
+            failedAt: now(),
+          }),
+        );
+        throw new ApplicationError(ApplicationErrorCode.INTERNAL_ERROR, "Publication failed");
+      }
+      await withRepositoryErrors(() =>
+        repository.completePublication({
+          publicationJobId: prepared.job.id,
+          postId,
+          revisionId: prepared.revision.id,
+          completedAt: now(),
+        }),
+      );
+    }
+
+    const post = await readPost(postId);
+    return {
+      post,
+      revision: mapRevision(prepared.revision),
+      publicationJobId: prepared.job.id,
+      ...paths,
+    };
+  };
+
   const listPosts = async (query: PostListQuery): Promise<CursorPage<PostListItemDto>> => {
     const limit = pageLimit(query.limit);
     const cursor = query.cursor === undefined ? undefined : decodeCursor(query.cursor, "posts");
@@ -643,6 +792,7 @@ export function createEditorialApplication(
     createPost,
     getPost: readPost,
     previewPost,
+    publishPost,
     listPosts,
     saveDraft,
     checkpointRevision,
