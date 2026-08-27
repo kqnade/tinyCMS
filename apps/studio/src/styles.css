@@ -332,7 +332,6 @@ input[readonly] {
   margin-top: 0;
 }
 
-.studio-body-editor .ProseMirror p,
 .studio-body-editor .ProseMirror h1,
 .studio-body-editor .ProseMirror h2,
 .studio-body-editor .ProseMirror h3,
@@ -342,6 +341,10 @@ input[readonly] {
 .studio-body-editor .ProseMirror ol,
 .studio-body-editor .ProseMirror table {
   margin-block: 1.1em;
+}
+
+.studio-body-editor .ProseMirror p {
+  margin-block: 0;
 }
 
 .studio-body-editor .ProseMirror h1,
@@ -373,19 +376,24 @@ input[readonly] {
 }
 
 .studio-body-editor .ProseMirror ul[data-type="taskList"] li {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
-  gap: var(--space-2);
+  column-gap: var(--space-2);
 }
 
 .studio-body-editor .ProseMirror ul[data-type="taskList"] li > label {
-  display: inline-flex;
-  flex: 0 0 auto;
-  margin-top: 0.5em;
+  display: flex;
+  height: 1lh;
+  align-items: center;
+}
+
+.studio-body-editor .ProseMirror ul[data-type="taskList"] li > label input {
+  margin: 0;
 }
 
 .studio-body-editor .ProseMirror ul[data-type="taskList"] li > div {
-  flex: 1;
+  min-width: 0;
 }
 
 .studio-body-editor .ProseMirror blockquote {

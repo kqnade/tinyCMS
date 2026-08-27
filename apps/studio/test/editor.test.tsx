@@ -963,8 +963,59 @@ describe("StudioEditor", () => {
     }
   });
 
+  it.each(["bulletList", "orderedList"] as const)(
+    "exits a %s when its only item's text is deleted",
+    async (listType) => {
+      installJsdomGeometry();
+      const user = userEvent.setup();
+      const editorRef = createRef<StudioEditorHandle>();
+
+      render(
+        <StudioEditor
+          content={createEditorContent({
+            type: "doc",
+            content: [
+              {
+                type: listType,
+                ...(listType === "orderedList" ? { attrs: { start: 1 } } : {}),
+                content: [
+                  {
+                    type: "listItem",
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "Item" }] }],
+                  },
+                ],
+              },
+            ],
+          })}
+          ref={editorRef}
+        />,
+      );
+      const proseMirror = document.querySelector<HTMLElement>(".ProseMirror");
+      const paragraph = proseMirror?.querySelector("li p");
+      if (!proseMirror || !paragraph) throw new Error("List item is missing");
+
+      proseMirror.focus();
+      const range = document.createRange();
+      const text = paragraph.firstChild;
+      if (!text) throw new Error("List item text is missing");
+      range.setStart(text, text.textContent?.length ?? 0);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      await new Promise((resolve) => window.setTimeout(resolve, 30));
+      await user.keyboard("{Backspace}{Backspace}{Backspace}{Backspace}");
+
+      expect(editorRef.current?.getContent()).toEqual(
+        createEditorContent({ type: "doc", content: [{ type: "paragraph" }] }),
+      );
+    },
+  );
+
   it.each([
     ["* ", "bulletList"],
+    ["- ", "bulletList"],
     ["1. ", "orderedList"],
     ["[ ] ", "taskList"],
     ["- [ ] ", "taskList"],

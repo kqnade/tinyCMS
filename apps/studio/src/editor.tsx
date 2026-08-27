@@ -1,5 +1,6 @@
 import {
   Extension,
+  InputRule,
   type JSONContent,
   Node,
   type Editor as TiptapEditorInstance,
@@ -8,7 +9,8 @@ import {
 import { BulletList, ListItem, ListKit, OrderedList, TaskItem } from "@tiptap/extension-list";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import type { DOMOutputSpec, Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { Plugin } from "@tiptap/pm/state";
+import { liftListItem } from "@tiptap/pm/schema-list";
+import { Plugin, type Transaction } from "@tiptap/pm/state";
 import { EditorContent as TiptapEditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -172,6 +174,45 @@ const StudioTableStructureGuard = Extension.create({
   },
 });
 
+const emptyListItemExitMeta = "studioEmptyListItemExit";
+
+const StudioEmptyListItemExit = Extension.create({
+  name: emptyListItemExitMeta,
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        appendTransaction: (transactions, oldState, newState) => {
+          if (
+            transactions.some((transaction) => transaction.getMeta(emptyListItemExitMeta)) ||
+            !transactions.some((transaction) => transaction.docChanged) ||
+            oldState.doc.content.size <= newState.doc.content.size ||
+            oldState.selection.$from.parent.content.size === 0 ||
+            !newState.selection.empty ||
+            !newState.selection.$from.parent.isTextblock ||
+            newState.selection.$from.parent.content.size !== 0
+          ) {
+            return null;
+          }
+
+          const { $from } = newState.selection;
+          const inListItem = Array.from({ length: $from.depth }, (_, index) => index + 1).some(
+            (depth) => $from.node(depth).type.name === "listItem",
+          );
+          const listItem = newState.schema.nodes.listItem;
+          if (!inListItem || !listItem) return null;
+
+          let liftedTransaction: Transaction | null = null;
+          liftListItem(listItem)(newState, (transaction) => {
+            liftedTransaction = transaction.setMeta(emptyListItemExitMeta, true);
+          });
+          return liftedTransaction;
+        },
+      }),
+    ];
+  },
+});
+
 const editorExtensions = [
   StarterKit.configure({
     bulletList: false,
@@ -199,7 +240,7 @@ const editorExtensions = [
     addInputRules() {
       return [
         wrappingInputRule({
-          find: /^\s*([+*])\s$/,
+          find: /^\s*([-*])\s$/,
           type: this.type,
         }),
       ];
@@ -209,6 +250,23 @@ const editorExtensions = [
   ListItem,
   TaskItem.extend({
     addInputRules() {
+      const bulletTaskRule = new InputRule({
+        find: /^\s*\[([ x])\]\s$/i,
+        handler: ({ chain, match, range, state }) => {
+          const $from = state.doc.resolve(range.from);
+          const inBulletList = Array.from({ length: $from.depth }, (_, index) => index + 1).some(
+            (depth) => $from.node(depth).type.name === "bulletList",
+          );
+          if (!inBulletList) return;
+
+          chain()
+            .deleteRange(range)
+            .toggleBulletList()
+            .toggleTaskList()
+            .updateAttributes("taskItem", { checked: match[1]?.toLowerCase() === "x" })
+            .run();
+        },
+      });
       const markdownTaskRule = wrappingInputRule({
         find: /^\s*-\s+\[([ x])\]\s$/i,
         getAttributes: (match) => ({ checked: match[1]?.toLowerCase() === "x" }),
@@ -216,7 +274,7 @@ const editorExtensions = [
       });
       const parentRules = this.parent?.() ?? [];
 
-      return [markdownTaskRule, ...parentRules];
+      return [bulletTaskRule, markdownTaskRule, ...parentRules];
     },
   }),
   StudioDocument,
@@ -230,6 +288,7 @@ const editorExtensions = [
   StudioTableRow,
   StudioImage,
   StudioTableStructureGuard,
+  StudioEmptyListItemExit,
 ];
 
 function toRawTiptapDoc(value: JSONContent): RawTiptapDoc {
