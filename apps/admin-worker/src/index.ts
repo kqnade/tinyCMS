@@ -1,34 +1,44 @@
 import {
+  type AccessIdentity,
+  ApplicationError,
+  ApplicationErrorCode,
+  createEditorialApplication,
+  createMediaApplication,
+  type EditorialApplication,
+  MAX_MEDIA_BYTES,
+  type MediaApplication,
+} from "@tinycms/application";
+import {
+  ADMIN_MEDIA_ITEM_ROUTE,
+  ADMIN_MEDIA_ORIGINAL_ROUTE,
+  ADMIN_MEDIA_ROUTE,
   ADMIN_POST_DRAFT_ROUTE,
   ADMIN_POST_REVISION_RESTORE_ROUTE,
   ADMIN_POST_REVISIONS_ROUTE,
   ADMIN_POST_ROUTE,
   ADMIN_POSTS_ROUTE,
-  ErrorCode,
-  HTTP_STATUS_BY_ERROR_CODE,
   type ContractParseResult,
-  WRITE_BOUNDARY_HEADER,
-  WRITE_BOUNDARY_VALUE,
+  ErrorCode,
   errorResponse,
+  HTTP_STATUS_BY_ERROR_CODE,
   parseCheckpointPostRevisionRequest,
   parseCreatePostRequest,
+  parseDeleteMediaRequest,
+  parseMediaListQuery,
+  parseMediaRouteParams,
   parsePostListQuery,
   parsePostRevisionListQuery,
   parsePostRevisionRouteParams,
   parsePostRouteParams,
   parseRestorePostRevisionRequest,
   parseSavePostDraftRequest,
+  parseUpdateMediaRequest,
   successResponse,
+  WRITE_BOUNDARY_HEADER,
+  WRITE_BOUNDARY_VALUE,
 } from "@tinycms/contracts";
-import {
-  ApplicationError,
-  ApplicationErrorCode,
-  type AccessIdentity,
-  type EditorialApplication,
-  createEditorialApplication,
-} from "@tinycms/application";
-import { createEditorialRepository } from "@tinycms/database";
-import { Hono, type Context } from "hono";
+import { createEditorialRepository, createMediaRepository } from "@tinycms/database";
+import { type Context, Hono } from "hono";
 import type { HonoJsonWebKey } from "hono/utils/jwt/jws";
 import { decodeHeader, verify } from "hono/utils/jwt/jwt";
 import type { JWTPayload } from "hono/utils/jwt/types";
@@ -44,6 +54,9 @@ type AdminWorker = {
     ACCESS_TEAM_DOMAIN?: string;
     ACCESS_AUD?: string;
     CMS_DB: D1Database;
+    MEDIA_ORIGINALS?: R2Bucket;
+    MEDIA_DERIVATIVES?: R2Bucket;
+    IMAGES?: ImagesBinding;
   };
   Variables: {
     requestId: string;
@@ -56,6 +69,7 @@ type AccessDependencies = {
   now?: () => number;
   uuidv7?: () => string;
   application?: EditorialApplication;
+  mediaApplication?: MediaApplication;
 };
 
 const MAX_JSON_BODY_BYTES = 1_048_576;
@@ -322,6 +336,20 @@ type JsonReadResult =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly message: string };
 
+type MediaMultipartReadResult =
+  | {
+      readonly ok: true;
+      readonly value: {
+        readonly filename: string;
+        readonly mediaType: string;
+        readonly bytes: Uint8Array;
+        readonly altText?: string;
+      };
+    }
+  | { readonly ok: false; readonly message: string };
+
+const MAX_MULTIPART_BODY_BYTES = MAX_MEDIA_BYTES + 1_048_576;
+
 function invalidRequest(context: AdminContext, details?: unknown): Response {
   return context.json(
     errorResponse(ErrorCode.INVALID_REQUEST, "Invalid request", context.get("requestId"), details),
@@ -364,25 +392,172 @@ async function readJsonBody(request: Request): Promise<JsonReadResult> {
   }
 }
 
-function applicationResponse<T>(context: AdminContext, result: Promise<T>): Promise<Response> {
-  return result
-    .then((data) => context.json(successResponse(data, context.get("requestId"))))
-    .catch((error: unknown): Response => {
-      if (error instanceof ApplicationError) {
-        const code = error.code;
-        const isInternal = code === ApplicationErrorCode.INTERNAL_ERROR;
-        return context.json(
-          errorResponse(
-            code,
-            isInternal ? "Internal server error" : error.message,
-            context.get("requestId"),
-            isInternal ? undefined : error.details,
-          ),
-          HTTP_STATUS_BY_ERROR_CODE[code],
-        );
+async function readMediaMultipart(request: Request): Promise<MediaMultipartReadResult> {
+  const contentLength = request.headers.get("Content-Length");
+  if (contentLength !== null) {
+    const parsedLength = Number(contentLength);
+    if (
+      !Number.isSafeInteger(parsedLength) ||
+      parsedLength < 0 ||
+      parsedLength > MAX_MULTIPART_BODY_BYTES
+    ) {
+      return { ok: false, message: "Request body is too large" };
+    }
+  }
+
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return { ok: false, message: "Request body must be valid multipart form data" };
+  }
+
+  let file: File | undefined;
+  let altText: string | undefined;
+  let fileCount = 0;
+  let altTextCount = 0;
+  for (const [name, value] of form.entries()) {
+    if (name === "file") {
+      fileCount += 1;
+      if (!(value instanceof File)) {
+        return { ok: false, message: "A file field is required" };
       }
-      throw error;
+      file = value;
+      continue;
+    }
+    if (name === "altText") {
+      altTextCount += 1;
+      if (typeof value !== "string") {
+        return { ok: false, message: "altText must be text" };
+      }
+      altText = value;
+      continue;
+    }
+    return { ok: false, message: "Unexpected multipart field" };
+  }
+
+  if (fileCount !== 1 || file === undefined || altTextCount > 1) {
+    return { ok: false, message: "Exactly one file field is required" };
+  }
+
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    return { ok: false, message: "File could not be read" };
+  }
+
+  return {
+    ok: true,
+    value: {
+      filename: file.name,
+      mediaType: file.type,
+      bytes,
+      ...(altText === undefined ? {} : { altText }),
+    },
+  };
+}
+
+function mediaByteStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  const copy = bytes.slice();
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(copy);
+      controller.close();
+    },
+  });
+}
+
+function createMediaObjectStore(bucket: R2Bucket) {
+  return {
+    put: async (
+      key: string,
+      bytes: Uint8Array,
+      options: { readonly contentType: string; readonly cacheControl: string },
+    ): Promise<void> => {
+      await bucket.put(key, bytes, {
+        httpMetadata: {
+          contentType: options.contentType,
+          cacheControl: options.cacheControl,
+        },
+      });
+    },
+    delete: async (key: string): Promise<void> => {
+      await bucket.delete(key);
+    },
+  };
+}
+
+function createMediaInspector(images: ImagesBinding) {
+  return async (bytes: Uint8Array) => {
+    const result = await images.info(mediaByteStream(bytes));
+    if (result.format === "image/svg+xml" || !("fileSize" in result)) {
+      throw new Error("Media inspection failed");
+    }
+    return {
+      format: result.format,
+      fileSize: result.fileSize,
+      width: result.width,
+      height: result.height,
+    };
+  };
+}
+
+function createMediaTransformer(images: ImagesBinding) {
+  return async (input: {
+    readonly bytes: Uint8Array;
+    readonly width: number;
+    readonly height: number;
+    readonly format: "avif" | "webp";
+  }): Promise<Uint8Array> => {
+    const output = await images
+      .input(mediaByteStream(input.bytes))
+      .transform({ width: input.width, height: input.height, fit: "scale-down" })
+      .output({ format: `image/${input.format}` });
+    const response = await output.response();
+    if (!response.ok) {
+      throw new Error("Media transformation failed");
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  };
+}
+
+function applicationResponse<T>(
+  context: AdminContext,
+  result: Promise<T>,
+  status: 200 | 201 = 200,
+): Promise<Response> {
+  return result
+    .then((data) => context.json(successResponse(data, context.get("requestId")), status))
+    .catch((error: unknown): Response => applicationErrorResponse(context, error));
+}
+
+function applicationErrorResponse(context: AdminContext, error: unknown): Response {
+  if (!(error instanceof ApplicationError)) {
+    throw error;
+  }
+  const code = error.code;
+  if (code === ApplicationErrorCode.MEDIA_WRITE_FAILED) {
+    console.error({
+      requestId: context.get("requestId"),
+      errorCategory: "MEDIA_WRITE_FAILED",
     });
+  }
+  const isInternal = code === ApplicationErrorCode.INTERNAL_ERROR;
+  const isMediaWriteFailure = code === ApplicationErrorCode.MEDIA_WRITE_FAILED;
+  return context.json(
+    errorResponse(
+      code,
+      isInternal
+        ? "Internal server error"
+        : isMediaWriteFailure
+          ? "Media write failed"
+          : error.message,
+      context.get("requestId"),
+      isInternal || isMediaWriteFailure ? undefined : error.details,
+    ),
+    HTTP_STATUS_BY_ERROR_CODE[code],
+  );
 }
 
 function requestParams<T>(context: AdminContext, result: ContractParseResult<T>): T | Response {
@@ -390,6 +565,65 @@ function requestParams<T>(context: AdminContext, result: ContractParseResult<T>)
     return invalidRequest(context, result.issues);
   }
   return result.value;
+}
+
+function mediaContentDisposition(filename: string): string {
+  const fallback =
+    [...filename]
+      .map((character) =>
+        /^[\x20-\x7e]$/.test(character) && !/["\\;]/.test(character) ? character : "_",
+      )
+      .join("")
+      .replace(/[\r\n]/g, "_")
+      .slice(0, 120) || "download";
+  const encoded = [...new TextEncoder().encode(filename)]
+    .map((byte) => {
+      const character = String.fromCharCode(byte);
+      return /^[A-Za-z0-9!#$&+.^_`|~-]$/.test(character)
+        ? character
+        : `%${byte.toString(16).padStart(2, "0").toUpperCase()}`;
+    })
+    .join("");
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+function weakEtagMatches(header: string | null, etag: string): boolean {
+  if (header === null) return false;
+  return header
+    .split(",")
+    .map((value) => value.trim())
+    .some((value) => value === "*" || value === etag || value === `W/${etag}`);
+}
+
+async function streamMediaOriginal(
+  context: AdminContext,
+  descriptor: { readonly key: string; readonly filename: string; readonly mediaType: string },
+): Promise<Response> {
+  const bucket = context.env.MEDIA_ORIGINALS;
+  if (bucket === undefined) {
+    throw new ApplicationError(ApplicationErrorCode.INTERNAL_ERROR, "Internal server error");
+  }
+  const request = context.req.raw;
+  const object = await bucket.get(descriptor.key, { onlyIf: request.headers });
+  if (object === null) {
+    return context.json(
+      errorResponse(ErrorCode.NOT_FOUND, "Resource not found", context.get("requestId")),
+      HTTP_STATUS_BY_ERROR_CODE[ErrorCode.NOT_FOUND],
+    );
+  }
+
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    "Content-Type": descriptor.mediaType,
+    "Content-Disposition": mediaContentDisposition(descriptor.filename),
+    ETag: object.httpEtag,
+  });
+  const hasBody = "body" in object && object.body !== undefined;
+  if (!hasBody || weakEtagMatches(request.headers.get("If-None-Match"), object.httpEtag)) {
+    return new Response(null, { status: 304, headers });
+  }
+
+  return new Response(object.body, { status: 200, headers });
 }
 
 export function createAdminApp(dependencies: AccessDependencies = {}) {
@@ -456,9 +690,14 @@ export function createAdminApp(dependencies: AccessDependencies = {}) {
       const request = context.req.raw;
       const contentType = request.headers.get("Content-Type");
       const origin = request.headers.get("Origin");
+      const isMediaUpload =
+        context.req.method === "POST" && new URL(request.url).pathname === ADMIN_MEDIA_ROUTE;
+      const normalizedContentType = contentType?.split(";", 1)[0]?.trim().toLowerCase() ?? null;
+      const contentTypeAllowed = isMediaUpload
+        ? normalizedContentType === "multipart/form-data"
+        : normalizedContentType === "application/json";
       if (
-        contentType === null ||
-        contentType.split(";", 1)[0]?.trim().toLowerCase() !== "application/json" ||
+        !contentTypeAllowed ||
         request.headers.get(WRITE_BOUNDARY_HEADER) !== WRITE_BOUNDARY_VALUE ||
         origin !== new URL(request.url).origin
       ) {
@@ -482,8 +721,111 @@ export function createAdminApp(dependencies: AccessDependencies = {}) {
     });
   };
 
+  const resolveMediaApplication = (context: AdminContext): MediaApplication => {
+    if (dependencies.mediaApplication !== undefined) {
+      return dependencies.mediaApplication;
+    }
+    const { CMS_DB, MEDIA_ORIGINALS, MEDIA_DERIVATIVES, IMAGES } = context.env;
+    if (
+      CMS_DB === undefined ||
+      MEDIA_ORIGINALS === undefined ||
+      MEDIA_DERIVATIVES === undefined ||
+      IMAGES === undefined
+    ) {
+      throw new ApplicationError(ApplicationErrorCode.INTERNAL_ERROR, "Internal server error");
+    }
+    return createMediaApplication({
+      repository: createMediaRepository(CMS_DB),
+      inspector: createMediaInspector(IMAGES),
+      originalStore: createMediaObjectStore(MEDIA_ORIGINALS),
+      derivativeStore: createMediaObjectStore(MEDIA_DERIVATIVES),
+      transformer: createMediaTransformer(IMAGES),
+      ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+      ...(dependencies.uuidv7 === undefined ? {} : { uuidv7: dependencies.uuidv7 }),
+    });
+  };
+
   application.get("/healthz", (context) => {
     return context.json(successResponse({ status: "ok" }, context.get("requestId")));
+  });
+
+  application.get(ADMIN_MEDIA_ROUTE, (context) => {
+    const rawQuery: Record<string, string> = {};
+    const cursor = context.req.query("cursor");
+    const limit = context.req.query("limit");
+    if (cursor !== undefined) rawQuery.cursor = cursor;
+    if (limit !== undefined) rawQuery.limit = limit;
+    const parsed = parseMediaListQuery(rawQuery);
+    const query = requestParams(context, parsed);
+    if (query instanceof Response) return query;
+    return applicationResponse(context, resolveMediaApplication(context).listMedia(query));
+  });
+
+  application.post(ADMIN_MEDIA_ROUTE, async (context) => {
+    const body = await readMediaMultipart(context.req.raw);
+    if (!body.ok) return invalidRequest(context, [{ code: "invalid_body", message: body.message }]);
+    return applicationResponse(
+      context,
+      resolveMediaApplication(context).createMedia(body.value, context.get("accessIdentity")),
+      201,
+    );
+  });
+
+  application.get(ADMIN_MEDIA_ITEM_ROUTE, (context) => {
+    const params = requestParams(
+      context,
+      parseMediaRouteParams({ mediaId: context.req.param("mediaId") }),
+    );
+    if (params instanceof Response) return params;
+    return applicationResponse(context, resolveMediaApplication(context).getMedia(params.mediaId));
+  });
+
+  application.patch(ADMIN_MEDIA_ITEM_ROUTE, async (context) => {
+    const params = requestParams(
+      context,
+      parseMediaRouteParams({ mediaId: context.req.param("mediaId") }),
+    );
+    if (params instanceof Response) return params;
+    const body = await readJsonBody(context.req.raw);
+    if (!body.ok) return invalidRequest(context, [{ code: "invalid_body", message: body.message }]);
+    const parsed = parseUpdateMediaRequest(body.value);
+    const request = requestParams(context, parsed);
+    if (request instanceof Response) return request;
+    return applicationResponse(
+      context,
+      resolveMediaApplication(context).updateMediaAlt(params.mediaId, request),
+    );
+  });
+
+  application.delete(ADMIN_MEDIA_ITEM_ROUTE, async (context) => {
+    const params = requestParams(
+      context,
+      parseMediaRouteParams({ mediaId: context.req.param("mediaId") }),
+    );
+    if (params instanceof Response) return params;
+    const body = await readJsonBody(context.req.raw);
+    if (!body.ok) return invalidRequest(context, [{ code: "invalid_body", message: body.message }]);
+    const parsed = parseDeleteMediaRequest(body.value);
+    const request = requestParams(context, parsed);
+    if (request instanceof Response) return request;
+    return applicationResponse(
+      context,
+      resolveMediaApplication(context).trashMedia(params.mediaId, request),
+    );
+  });
+
+  application.get(ADMIN_MEDIA_ORIGINAL_ROUTE, async (context) => {
+    const params = requestParams(
+      context,
+      parseMediaRouteParams({ mediaId: context.req.param("mediaId") }),
+    );
+    if (params instanceof Response) return params;
+    try {
+      const descriptor = await resolveMediaApplication(context).getMediaOriginal(params.mediaId);
+      return await streamMediaOriginal(context, descriptor);
+    } catch (error: unknown) {
+      return applicationErrorResponse(context, error);
+    }
   });
 
   application.get(ADMIN_POSTS_ROUTE, (context) => {

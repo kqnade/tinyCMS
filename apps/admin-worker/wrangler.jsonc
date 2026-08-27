@@ -22,5 +22,18 @@
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "../../migrations/d1"
     }
-  ]
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_ORIGINALS",
+      "bucket_name": "tinycms-media-originals-local"
+    },
+    {
+      "binding": "MEDIA_DERIVATIVES",
+      "bucket_name": "tinycms-media-derivatives-local"
+    }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  }
 }
