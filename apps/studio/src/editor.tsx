@@ -31,6 +31,7 @@ import {
   type RawTiptapNode,
   type StudioImageAttrs,
 } from "./editor-content";
+import { MaterialSymbol, type MaterialSymbolName } from "./material-symbol";
 
 export type StudioEditorHandle = {
   getContent: () => EditorContent;
@@ -321,58 +322,16 @@ const formatButtons: readonly {
   { label: "Link", name: "link" },
 ];
 
-function FormatIcon({ name }: { name: FormatName }) {
-  if (name === "bold") {
-    return (
-      <>
-        <path d="M7 5h5.5a3.5 3.5 0 0 1 0 7H7z" />
-        <path d="M7 12h6a3.5 3.5 0 0 1 0 7H7z" />
-      </>
-    );
-  }
-  if (name === "italic") {
-    return <path d="M10 5h7M7 19h7M14 5 10 19" />;
-  }
-  if (name === "strike") {
-    return (
-      <>
-        <path d="M6 9.5C6 7 8 5 11 5c2.2 0 3.8 1 4.7 2.5M18 14.5c0 2.5-2 4.5-5 4.5-2.2 0-3.8-1-4.7-2.5" />
-        <path d="M4 12h16" />
-      </>
-    );
-  }
-  if (name === "code") {
-    return (
-      <>
-        <path d="m9 7-4 5 4 5M15 7l4 5-4 5" />
-        <path d="m13 5-2 14" />
-      </>
-    );
-  }
-  return (
-    <>
-      <path d="M10.5 13.5 9 15a3 3 0 0 1-4.2-4.2l2.6-2.6A3 3 0 0 1 12 8" />
-      <path d="m13.5 10.5 1.5-1.5a3 3 0 0 1 4.2 4.2l-2.6 2.6A3 3 0 0 1 12 16" />
-      <path d="m8.5 12.5 7-1" />
-    </>
-  );
-}
+const formatSymbolNames: Record<FormatName, MaterialSymbolName> = {
+  bold: "format_bold",
+  code: "code",
+  italic: "format_italic",
+  link: "link",
+  strike: "strikethrough_s",
+};
 
 function FormatButtonIcon({ name }: { name: FormatName }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className="studio-editor-format-icon"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-    >
-      <FormatIcon name={name} />
-    </svg>
-  );
+  return <MaterialSymbol className="studio-editor-format-icon" name={formatSymbolNames[name]} />;
 }
 
 function toTiptapDocument(document: RawTiptapDoc): JSONContent {

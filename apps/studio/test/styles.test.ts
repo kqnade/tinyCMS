@@ -17,9 +17,10 @@ function extractThemeTokens(block: string | undefined) {
 }
 
 function themeTokens() {
-  return [...styles.matchAll(/:root\s*\{([\s\S]*?)\}/g)].map(([, block]) =>
-    extractThemeTokens(block),
-  );
+  const light = styles.match(/:root\s*\{([\s\S]*?)\}/)?.[1];
+  const dark = styles.match(/:root\[data-theme="dark"\]\s*\{([\s\S]*?)\}/)?.[1];
+
+  return [extractThemeTokens(light), extractThemeTokens(dark)];
 }
 
 function relativeLuminance(hex: string) {
@@ -72,7 +73,7 @@ describe("Studio styles", () => {
     expect(styles).toContain("--border");
     expect(styles).toContain("--focus");
     expect(styles).toContain(":focus-visible");
-    expect(styles).toContain("@media (prefers-color-scheme: dark)");
+    expect(styles).toContain(':root[data-theme="dark"]');
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
     expect(styles).toContain("@media (max-width: 48rem)");
     expect(styles).toContain("min-width: 320px");

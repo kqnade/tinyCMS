@@ -7,7 +7,7 @@ import type {
   PostRevisionListItemDto,
   SavePostDraftRequest,
 } from "@tinycms/contracts";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type DraftPersistence,
   type DraftSaveRequest,
@@ -19,21 +19,10 @@ import {
 import { StudioEditor, type StudioEditorHandle } from "./editor";
 import { createEmptyEditorContent, parseEditorContent } from "./editor-content";
 import { type EditorialApi, isEditorialConflict } from "./editorial-api";
+import { MaterialSymbol } from "./material-symbol";
 import { MediaPanel } from "./media-panel";
+import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui";
-
-type IconName =
-  | "back"
-  | "document"
-  | "history"
-  | "image"
-  | "menu"
-  | "plus"
-  | "refresh"
-  | "retry"
-  | "save"
-  | "settings"
-  | "sparkle";
 
 export type AppProps = DraftSessionOptions & {
   readonly api?: EditorialApi;
@@ -42,76 +31,6 @@ export type AppProps = DraftSessionOptions & {
 type WorkspaceState = "error" | "idle" | "loading" | "ready";
 type WorkspaceAction = "checkpoint" | "create" | "load" | "reload" | "restore" | "retry";
 type Panel = "history" | "media" | "posts";
-
-function Icon({ name }: { name: IconName }) {
-  const paths: Record<IconName, ReactNode> = {
-    back: <path d="m15 5-7 7 7 7M8 12h12" />,
-    document: (
-      <>
-        <path d="M6 3h9l3 3v15H6z" />
-        <path d="M15 3v4h4M9 12h6M9 16h6" />
-      </>
-    ),
-    history: (
-      <>
-        <path d="M4 12a8 8 0 1 0 2.3-5.7" />
-        <path d="M4 5v5h5M12 7v5l3 2" />
-      </>
-    ),
-    image: (
-      <>
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <circle cx="9" cy="9" r="1.5" />
-        <path d="m4 17 5-5 4 4 2-2 5 5" />
-      </>
-    ),
-    menu: <path d="M4 7h16M4 12h16M4 17h16" />,
-    plus: <path d="M12 5v14M5 12h14" />,
-    refresh: (
-      <>
-        <path d="M20 11a8 8 0 0 0-14-4L4 9" />
-        <path d="M4 4v5h5M4 13a8 8 0 0 0 14 4l2-2" />
-        <path d="M20 20v-5h-5" />
-      </>
-    ),
-    retry: (
-      <>
-        <path d="M4 7h7V1" />
-        <path d="M4.9 12A7.5 7.5 0 1 0 7 6.6L4 9" />
-      </>
-    ),
-    save: (
-      <>
-        <path d="M5 4h12l2 2v14H5z" />
-        <path d="M8 4v6h8V4M8 20v-6h8v6" />
-      </>
-    ),
-    settings: (
-      <>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5L9 6.1a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L5 11a7 7 0 0 0 0 2l-2.1 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.5 3.1h5l.5-3.1a7 7 0 0 0 1.7-1l2.4 1 2-3.4L19 13a7 7 0 0 0 0-1Z" />
-      </>
-    ),
-    sparkle: (
-      <path d="m12 3 1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4zM18 15l.7 2.3L21 18l-2.3.7L18 21l-.7-2.3L15 18l2.3-.7z" />
-    ),
-  };
-
-  return (
-    <svg
-      aria-hidden="true"
-      className="studio-icon"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.7"
-    >
-      {paths[name]}
-    </svg>
-  );
-}
 
 const statusLabels: Record<DraftSaveState, string> = {
   conflict: "Conflict",
@@ -543,11 +462,12 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
               aria-label={panelOpen ? "Close menu" : "Open menu"}
               aria-controls="studio-side-panel"
               aria-expanded={panelOpen}
-              className="studio-icon-button"
+              aria-pressed={panelOpen}
+              className={`studio-icon-button studio-menu-button${panelOpen ? " studio-menu-button--open" : ""}`}
               onClick={() => setPanelOpen((open) => !open)}
               variant="ghost"
             >
-              <Icon name="menu" />
+              <MaterialSymbol name={panelOpen ? "close" : "menu"} />
             </Button>
             <span className="studio-brand">tinyCMS</span>
           </div>
@@ -576,7 +496,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
                   onClick={() => void retryConflict()}
                   variant="ghost"
                 >
-                  <Icon name="retry" />
+                  <MaterialSymbol name="replay" />
                 </Button>
                 <Button
                   aria-label="Reload remote draft"
@@ -585,7 +505,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
                   onClick={() => void reloadRemote()}
                   variant="ghost"
                 >
-                  <Icon name="refresh" />
+                  <MaterialSymbol name="refresh" />
                 </Button>
               </>
             ) : null}
@@ -596,7 +516,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
               onClick={() => void session.save()}
               variant="ghost"
             >
-              <Icon name="save" />
+              <MaterialSymbol name="save" />
             </Button>
             <Button
               aria-label="Publish"
@@ -609,6 +529,15 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
           </div>
         </div>
       </header>
+
+      <button
+        aria-label="Dismiss menu"
+        className="studio-menu-backdrop"
+        hidden={!panelOpen}
+        onClick={() => setPanelOpen(false)}
+        tabIndex={-1}
+        type="button"
+      />
 
       <aside
         aria-label="Menu"
@@ -628,7 +557,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             }}
             variant="ghost"
           >
-            <Icon name="document" />
+            <MaterialSymbol name="article" />
           </Button>
           <Button
             aria-label="History"
@@ -638,7 +567,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             onClick={openHistory}
             variant="ghost"
           >
-            <Icon name="history" />
+            <MaterialSymbol name="history" />
           </Button>
           <Button
             aria-label="Media"
@@ -657,13 +586,13 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             title="Media"
             variant="ghost"
           >
-            <Icon name="image" />
+            <MaterialSymbol name="image" />
           </Button>
           <Button aria-label="AI assist" className="studio-icon-button" disabled variant="ghost">
-            <Icon name="sparkle" />
+            <MaterialSymbol name="auto_awesome" />
           </Button>
           <Button aria-label="Settings" className="studio-icon-button" disabled variant="ghost">
-            <Icon name="settings" />
+            <MaterialSymbol name="settings" />
           </Button>
         </nav>
 
@@ -676,7 +605,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
               onClick={() => void createPost()}
               variant="ghost"
             >
-              <Icon name="plus" />
+              <MaterialSymbol name="add" />
             </Button>
             <div className="studio-post-list">
               {posts.map((post) => (
@@ -705,7 +634,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
                 onClick={() => void createCheckpoint()}
                 variant="ghost"
               >
-                <Icon name="save" />
+                <MaterialSymbol name="save" />
               </Button>
               {revisionCursor !== null ? (
                 <Button
@@ -715,7 +644,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
                   onClick={() => void loadRevisions(revisionCursor)}
                   variant="ghost"
                 >
-                  <Icon name="back" />
+                  <MaterialSymbol name="arrow_back" />
                 </Button>
               ) : null}
             </div>
@@ -789,13 +718,14 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
                   onClick={() => void retryWorkspace()}
                   variant="ghost"
                 >
-                  <Icon name="refresh" />
+                  <MaterialSymbol name="refresh" />
                 </Button>
               </>
             ) : null}
           </div>
         </section>
       </main>
+      <ThemeToggle />
     </div>
   );
 }

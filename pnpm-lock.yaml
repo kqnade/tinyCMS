@@ -53,6 +53,9 @@ importers:
 
   apps/studio:
     dependencies:
+      '@material-symbols/font-400':
+        specifier: 0.46.0
+        version: 0.46.0
       '@tinycms/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -656,6 +659,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
+
+  '@material-symbols/font-400@0.46.0':
+    resolution: {integrity: sha512-G1oDwRi+m1qHn7ehf6ZwBFr7FW0LvGNp3NrnQT8bz++E03cCWu8KZ6MGlvxnRzickFV3Za5oiyJqrhfsXlv+1Q==}
 
   '@oxc-project/types@0.146.0':
     resolution: {integrity: sha512-XC0QsnnhVe7sLIWmYmdPw7x5P0h4W8vUU3Nv1ySgWXtvCz8NizoAEpGXA0sOYoJQV2Rl13LgURAHQ5cI5ILCSA==}
@@ -2177,6 +2183,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@material-symbols/font-400@0.46.0': {}
 
   '@oxc-project/types@0.146.0': {}
 

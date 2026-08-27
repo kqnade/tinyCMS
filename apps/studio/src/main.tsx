@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "@material-symbols/font-400/rounded.css";
 import { App } from "./App";
 import { createEditorialApi } from "./editorial-api";
 import "./styles.css";

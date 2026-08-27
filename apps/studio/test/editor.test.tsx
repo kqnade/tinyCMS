@@ -784,8 +784,6 @@ describe("StudioEditor", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 30));
 
     const button = screen.getByRole("button", { name: label });
-    expect(button.textContent).toBe("");
-    expect(button.querySelector("svg")).not.toBeNull();
     if (markType === "link") {
       vi.spyOn(window, "prompt").mockReturnValue("https://example.test/article");
     }

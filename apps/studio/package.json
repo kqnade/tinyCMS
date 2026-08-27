@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@material-symbols/font-400": "0.46.0",
     "@tinycms/contracts": "workspace:*",
     "@tiptap/core": "3.30.3",
     "@tiptap/extension-list": "3.30.3",
