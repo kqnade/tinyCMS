@@ -227,6 +227,8 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
   const historyLoadedForRef = useRef<string | null>(null);
   const historyGenerationRef = useRef(0);
   const editorRef = useRef<StudioEditorHandle | null>(null);
+  const mediaToggleRef = useRef<HTMLButtonElement | null>(null);
+  const mediaSectionRef = useRef<HTMLElement | null>(null);
 
   selectedPostIdRef.current = selectedPostId;
 
@@ -361,6 +363,9 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
     const closeFromEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      if (mediaSectionRef.current?.contains(document.activeElement)) {
+        mediaToggleRef.current?.focus();
+      }
       setPanelOpen(false);
     };
 
@@ -629,7 +634,8 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             aria-pressed={panelOpen && activePanel === "media"}
             className="studio-icon-button"
             disabled={api === undefined}
-            onClick={() => {
+            onClick={(event) => {
+              mediaToggleRef.current = event.currentTarget;
               if (panelOpen && activePanel === "media") {
                 setPanelOpen(false);
                 return;
@@ -721,7 +727,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
         ) : null}
 
         {api !== undefined && activePanel === "media" ? (
-          <section aria-label="Media" className="studio-side-panel__content">
+          <section ref={mediaSectionRef} aria-label="Media" className="studio-side-panel__content">
             <MediaPanel api={api} editorDisabled={editorBusy} editorRef={editorRef} />
           </section>
         ) : null}

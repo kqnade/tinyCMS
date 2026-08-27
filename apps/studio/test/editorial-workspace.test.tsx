@@ -301,6 +301,27 @@ describe("Studio editorial workspace", () => {
     expect(screen.getByLabelText("Menu", { selector: "aside" }).hasAttribute("hidden")).toBe(true);
   });
 
+  it("restores focus to the Media toggle when Escape closes a focused Media panel", async () => {
+    const api = createMockApi();
+    render(<App api={api} />);
+    await waitFor(() => expect(api.getPost).toHaveBeenCalledWith(firstId));
+
+    await openStudioMenu();
+    const mediaButton = screen.getByRole("button", { name: "Media" });
+    fireEvent.click(mediaButton);
+    const mediaAssetButton = await screen.findByRole("button", { name: "Select media hero.jpg" });
+    mediaAssetButton.focus();
+
+    fireEvent.keyDown(mediaAssetButton, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Menu", { selector: "aside" }).hasAttribute("hidden")).toBe(
+        true,
+      ),
+    );
+    expect(document.activeElement).toBe(mediaButton);
+  });
+
   it("loads the next media cursor page and appends its ready assets", async () => {
     const secondMedia = mediaAsset(
       "018f0e5d-6a25-7b01-8f4a-7d62a5d3e412",
