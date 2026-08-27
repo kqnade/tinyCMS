@@ -37,6 +37,19 @@ export {
   type ApplicationErrorCodeValue,
 } from "./errors";
 export {
+  createMediaApplication,
+  type MediaAccessIdentity,
+  type MediaApplication,
+  type MediaApplicationDependencies,
+  type MediaDerivativeTransformerPort,
+  type MediaObjectStorePort,
+  type MediaObjectWriteOptions,
+  type MediaOriginalDescriptor,
+  type MediaPrivateOriginalStorePort,
+  type MediaPublicDerivativeStorePort,
+  type MediaTransformInput,
+} from "./media-application";
+export {
   MAX_MEDIA_ALT_TEXT_LENGTH,
   MAX_MEDIA_BYTES,
   MAX_MEDIA_DIMENSION,

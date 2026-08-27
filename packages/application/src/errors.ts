@@ -3,6 +3,7 @@ export const ApplicationErrorCode = {
   NOT_FOUND: "NOT_FOUND",
   CONFLICT: "CONFLICT",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+  MEDIA_WRITE_FAILED: "MEDIA_WRITE_FAILED",
 } as const;
 
 export type ApplicationErrorCodeValue =
