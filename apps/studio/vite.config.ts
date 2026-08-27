@@ -6,5 +6,14 @@ export default defineConfig({
   build: {
     emptyOutDir: true,
     outDir: "../../dist/studio",
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          return id.includes("/node_modules/@tiptap/") || id.includes("/node_modules/prosemirror-")
+            ? "editor"
+            : undefined;
+        },
+      },
+    },
   },
 });
