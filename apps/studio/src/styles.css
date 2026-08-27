@@ -6,7 +6,9 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --font-sans: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
+  --font-editor: "Iowan Old Style", "Hiragino Mincho ProN", "Yu Mincho", Georgia, ui-serif, serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --editor-measure: 42rem;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;
   --font-size-md: 0.875rem;
@@ -105,19 +107,52 @@ input[readonly] {
   position: sticky;
   z-index: 30;
   top: 0;
+  min-height: 4rem;
+  padding: 0 var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.studio-header__inner {
   display: flex;
+  width: 100%;
+  min-height: 4rem;
   align-items: center;
   justify-content: space-between;
-  min-height: 3rem;
-  padding: 0 var(--space-3);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  gap: var(--space-4);
+}
+
+.studio-header__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.studio-brand {
+  color: var(--foreground);
+  font-family: var(--font-editor);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.03em;
 }
 
 .studio-document-actions {
   display: flex;
   align-items: center;
+  gap: var(--space-1);
+}
+
+.studio-save-status {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
   gap: var(--space-2);
+  padding-inline: var(--space-2);
+  color: var(--muted-foreground);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
 }
 
 .studio-status-dot {
@@ -162,42 +197,57 @@ input[readonly] {
   height: 1.125rem;
 }
 
+.studio-publish-button.ui-button {
+  min-height: 2.25rem;
+  padding: 0 var(--space-4);
+  border-radius: 999px;
+  font-size: var(--font-size-sm);
+}
+
 .studio-main {
-  width: min(100% - 2rem, 70rem);
+  width: min(100% - 3rem, var(--editor-measure));
   margin: 0 auto;
   padding: 0;
 }
 
 .studio-editor {
   display: flex;
-  min-height: calc(100vh - 3rem);
+  min-height: calc(100vh - 4rem);
   flex-direction: column;
-  padding: clamp(2.5rem, 7vw, 5.5rem) clamp(0rem, 5vw, 4rem);
+  padding: clamp(4rem, 10vh, 7rem) 0 var(--space-12);
   background: var(--surface);
 }
 
 .studio-title-input {
   width: 100%;
+  min-height: 3.5rem;
+  padding: 0 0 var(--space-4);
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--foreground);
+  font-family: var(--font-editor);
+  font-size: clamp(2.75rem, 6vw, 3.75rem);
+  font-weight: var(--font-weight-regular);
+  letter-spacing: -0.045em;
+  line-height: var(--line-height-tight);
   opacity: 1;
-  outline-offset: 0.375rem;
 }
 
-.studio-title-input {
-  min-height: 2rem;
-  padding: 0;
+.studio-title-input::placeholder {
   color: var(--muted-foreground);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-regular);
+  opacity: 0.58;
+}
+
+.studio-title-input:focus-visible {
+  outline: 0;
+  box-shadow: none;
 }
 
 .studio-body-editor {
   min-height: 70vh;
   flex: 1;
-  margin-top: var(--space-6);
+  margin-top: var(--space-4);
 }
 
 .ui-card p {
@@ -211,14 +261,16 @@ input[readonly] {
   min-height: 70vh;
   padding: 0;
   color: var(--foreground);
-  font-size: clamp(1.0625rem, 1.5vw, 1.1875rem);
-  line-height: 1.9;
+  caret-color: var(--foreground);
+  font-family: var(--font-editor);
+  font-size: clamp(1.125rem, 1.5vw, 1.25rem);
+  line-height: 1.85;
   outline: 0;
 }
 
 .studio-body-editor .ProseMirror:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 3px;
+  outline: 0;
+  box-shadow: none;
 }
 
 .studio-body-editor .ProseMirror > :first-child {
@@ -411,7 +463,7 @@ input[readonly] {
 .studio-side-panel {
   position: fixed;
   z-index: 20;
-  top: 3rem;
+  top: 4rem;
   bottom: 0;
   left: 0;
   display: flex;
@@ -887,27 +939,54 @@ input[readonly] {
 }
 
 @media (max-width: 48rem) {
-  .studio-main {
-    width: min(100% - 1.5rem, 70rem);
-  }
-
-  .studio-editor {
-    padding-inline: clamp(0rem, 3vw, var(--space-6));
+  .studio-header {
+    padding-inline: var(--space-4);
   }
 }
 
 @media (max-width: 40rem) {
-  .studio-main {
-    width: min(100% - 1rem, 70rem);
-  }
-
-  .studio-editor {
-    padding-block: var(--space-8);
+  .studio-header {
     padding-inline: var(--space-2);
   }
 
-  .studio-body-editor .ProseMirror {
+  .studio-header__inner {
+    gap: var(--space-2);
+  }
+
+  .studio-header__identity {
+    gap: var(--space-1);
+  }
+
+  .studio-brand {
     font-size: var(--font-size-base);
+  }
+
+  .studio-save-status {
+    padding-inline: var(--space-1);
+  }
+
+  .studio-save-status__label {
+    display: none;
+  }
+
+  .studio-publish-button.ui-button {
+    padding-inline: var(--space-3);
+  }
+
+  .studio-main {
+    width: min(100% - 2rem, var(--editor-measure));
+  }
+
+  .studio-editor {
+    padding-block: var(--space-12);
+  }
+
+  .studio-title-input {
+    font-size: 2.5rem;
+  }
+
+  .studio-body-editor .ProseMirror {
+    font-size: var(--font-size-lg);
   }
 }
 

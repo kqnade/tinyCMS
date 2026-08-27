@@ -29,7 +29,6 @@ type IconName =
   | "image"
   | "menu"
   | "plus"
-  | "publish"
   | "refresh"
   | "retry"
   | "save"
@@ -68,12 +67,6 @@ function Icon({ name }: { name: IconName }) {
     ),
     menu: <path d="M4 7h16M4 12h16M4 17h16" />,
     plus: <path d="M12 5v14M5 12h14" />,
-    publish: (
-      <>
-        <path d="M12 19V5" />
-        <path d="m7 10 5-5 5 5" />
-      </>
-    ),
     refresh: (
       <>
         <path d="M20 11a8 8 0 0 0-14-4L4 9" />
@@ -544,58 +537,76 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
   return (
     <div className="studio-shell" data-panel-open={panelOpen}>
       <header className="studio-header">
-        <Button
-          aria-label={panelOpen ? "Close menu" : "Open menu"}
-          aria-controls="studio-side-panel"
-          aria-expanded={panelOpen}
-          className="studio-icon-button"
-          onClick={() => setPanelOpen((open) => !open)}
-          variant="ghost"
-        >
-          <Icon name="menu" />
-        </Button>
+        <div className="studio-header__inner">
+          <div className="studio-header__identity">
+            <Button
+              aria-label={panelOpen ? "Close menu" : "Open menu"}
+              aria-controls="studio-side-panel"
+              aria-expanded={panelOpen}
+              className="studio-icon-button"
+              onClick={() => setPanelOpen((open) => !open)}
+              variant="ghost"
+            >
+              <Icon name="menu" />
+            </Button>
+            <span className="studio-brand">tinyCMS</span>
+          </div>
 
-        <div className="studio-document-actions">
-          <span
-            aria-label={statusLabel}
-            className={`studio-status-dot studio-status-dot--${session.saveState}`}
-            data-save-state={session.saveState}
-            role="status"
-          />
-          {session.saveState === "conflict" && api !== undefined ? (
-            <>
-              <Button
-                aria-label="Overwrite remote with local"
-                className="studio-icon-button"
-                disabled={workspaceAction !== null}
-                onClick={() => void retryConflict()}
-                variant="ghost"
-              >
-                <Icon name="retry" />
-              </Button>
-              <Button
-                aria-label="Reload remote draft"
-                className="studio-icon-button"
-                disabled={workspaceAction !== null}
-                onClick={() => void reloadRemote()}
-                variant="ghost"
-              >
-                <Icon name="refresh" />
-              </Button>
-            </>
-          ) : null}
-          <Button
-            aria-label="Save"
-            className="studio-icon-button"
-            disabled={!canSave || workspaceAction !== null}
-            onClick={() => void session.save()}
-            variant="ghost"
-          >
-            <Icon name="save" />
-          </Button>
-          <Button aria-label="Publish" className="studio-icon-button" disabled variant="ghost">
-            <Icon name="publish" />
-          </Button>
+          <div className="studio-document-actions">
+            <span
+              aria-label={statusLabel}
+              className="studio-save-status"
+              data-save-state={session.saveState}
+              role="status"
+            >
+              <span
+                aria-hidden="true"
+                className={`studio-status-dot studio-status-dot--${session.saveState}`}
+              />
+              <span aria-hidden="true" className="studio-save-status__label">
+                {statusLabel}
+              </span>
+            </span>
+            {session.saveState === "conflict" && api !== undefined ? (
+              <>
+                <Button
+                  aria-label="Overwrite remote with local"
+                  className="studio-icon-button"
+                  disabled={workspaceAction !== null}
+                  onClick={() => void retryConflict()}
+                  variant="ghost"
+                >
+                  <Icon name="retry" />
+                </Button>
+                <Button
+                  aria-label="Reload remote draft"
+                  className="studio-icon-button"
+                  disabled={workspaceAction !== null}
+                  onClick={() => void reloadRemote()}
+                  variant="ghost"
+                >
+                  <Icon name="refresh" />
+                </Button>
+              </>
+            ) : null}
+            <Button
+              aria-label="Save"
+              className="studio-icon-button"
+              disabled={!canSave || workspaceAction !== null}
+              onClick={() => void session.save()}
+              variant="ghost"
+            >
+              <Icon name="save" />
+            </Button>
+            <Button
+              aria-label="Publish"
+              className="studio-publish-button"
+              disabled
+              variant="primary"
+            >
+              Publish
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -740,6 +751,7 @@ export function App({ api, persistence: initialPersistence, ...sessionOptions }:
             className="studio-title-input"
             disabled={editorBusy}
             onChange={(event) => session.setTitle(event.target.value)}
+            placeholder="Title"
             type="text"
             value={session.title}
           />

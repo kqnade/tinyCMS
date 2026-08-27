@@ -15,7 +15,7 @@ describe("Studio writing surface", () => {
 
     expect(markup).toContain("<main");
     expect(markup).toContain('<section class="studio-editor" aria-label="Editor">');
-    expect(markup).toMatch(/<input[^>]+aria-label="Title"[^>]+type="text"/);
+    expect(markup).toMatch(/<input[^>]+aria-label="Title"[^>]+placeholder="Title"[^>]+type="text"/);
     expect(markup).toContain('class="studio-editor-input studio-body-editor"');
   });
 
@@ -31,20 +31,15 @@ describe("Studio writing surface", () => {
     expect(markup).toContain('<nav aria-label="Studio">');
   });
 
-  it("names icon-only controls and keeps unavailable mutations disabled", () => {
+  it("names controls and keeps unavailable mutations disabled", () => {
     const markup = renderToStaticMarkup(<App />);
-    const buttonContents = [...markup.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map(
-      ([, content]) => content,
-    );
 
     expect(markup).toMatch(/<button[^>]+aria-label="Save"[^>]+disabled=""/);
-    expect(markup).toMatch(/<button[^>]+aria-label="Publish"[^>]+disabled=""/);
+    expect(markup).toMatch(
+      /<button[^>]+aria-label="Publish"[^>]+disabled=""[^>]*>Publish<\/button>/,
+    );
     for (const label of ["Posts", "Media", "AI assist", "Settings"]) {
       expect(markup).toMatch(new RegExp(`<button[^>]+aria-label="${label}"[^>]+disabled=""`));
     }
-    expect(buttonContents.length).toBeGreaterThan(0);
-    expect(buttonContents.every((content) => /^<svg\b[\s\S]*<\/svg>$/.test(content ?? ""))).toBe(
-      true,
-    );
   });
 });
