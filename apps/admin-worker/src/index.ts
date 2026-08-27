@@ -51,6 +51,7 @@ const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
 const JWKS_FORCED_REFRESH_COOLDOWN_MS = 60 * 1000;
 const ACCESS_TEAM_DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+cloudflareaccess\.com$/;
+const LOCAL_DEV_HOSTS = new Set(["127.0.0.1", "localhost"]);
 
 type AdminWorker = {
   Bindings: {
@@ -858,11 +859,12 @@ export function createAdminApp(dependencies: AccessDependencies = {}) {
   });
 
   application.use("*", async (context, next) => {
+    const configuredHost = context.env.ADMIN_HOST.trim().toLowerCase();
     const requestHost = new URL(context.req.url).hostname.toLowerCase();
     if (
       context.env.LOCAL_DEV_AUTH === "1" &&
-      context.env.ADMIN_HOST === "localhost" &&
-      requestHost === "localhost"
+      LOCAL_DEV_HOSTS.has(configuredHost) &&
+      requestHost === configuredHost
     ) {
       context.set("accessIdentity", {
         subject: "local-development",

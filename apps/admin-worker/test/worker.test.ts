@@ -184,7 +184,9 @@ describe("admin worker", () => {
   });
 
   it("requires an Access assertion on the configured host", async () => {
-    const response = await exports.default.fetch("https://localhost/healthz");
+    const response = await app.request("https://localhost/healthz", undefined, {
+      ADMIN_HOST: "localhost",
+    });
     const requestId = response.headers.get("X-Request-Id");
 
     expect(response.status).toBe(401);
@@ -200,6 +202,16 @@ describe("admin worker", () => {
   it("allows an unauthenticated request in explicit localhost development mode", async () => {
     const response = await app.request("http://localhost/healthz", undefined, {
       ADMIN_HOST: "localhost",
+      LOCAL_DEV_AUTH: "1",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { status: "ok" } });
+  });
+
+  it("allows explicit development authentication on the IPv4 loopback host", async () => {
+    const response = await app.request("http://127.0.0.1/healthz", undefined, {
+      ADMIN_HOST: "127.0.0.1",
       LOCAL_DEV_AUTH: "1",
     });
 
@@ -248,9 +260,15 @@ describe("admin worker", () => {
   it("rejects an assertion when Access variables are not configured", async () => {
     const key = await createSigningKey("missing-config-key");
     const assertion = await key.sign({ exp: Math.floor(Date.now() / 1000) + 300 });
-    const response = await exports.default.fetch("https://localhost/healthz", {
-      headers: { "Cf-Access-Jwt-Assertion": assertion },
-    });
+    const response = await app.request(
+      "https://localhost/healthz",
+      { headers: { "Cf-Access-Jwt-Assertion": assertion } },
+      {
+        ADMIN_HOST: "localhost",
+        ACCESS_TEAM_DOMAIN: "",
+        ACCESS_AUD: "",
+      },
+    );
     const requestId = response.headers.get("X-Request-Id");
 
     expect(response.status).toBe(401);
