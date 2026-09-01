@@ -13,6 +13,6 @@
     "@tinycms/application": "workspace:*",
     "@tinycms/contracts": "workspace:*",
     "@tinycms/database": "workspace:*",
-    "hono": "4.13.4"
+    "hono": "4.13.5"
   }
 }
