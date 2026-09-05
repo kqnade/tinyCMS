@@ -13,10 +13,10 @@ importers:
         version: 2.5.12
       '@cloudflare/vitest-plugin':
         specifier: 1.1.4
-        version: 1.1.4(@cloudflare/workers-types@5.20260825.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(jsdom@30.0.1)(vite@8.2.2(esbuild@0.28.1)))
+        version: 1.1.4(@cloudflare/workers-types@5.20260904.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(jsdom@30.0.1)(vite@8.2.2(esbuild@0.28.1)))
       '@cloudflare/workers-types':
-        specifier: 5.20260825.1
-        version: 5.20260825.1
+        specifier: 5.20260904.1
+        version: 5.20260904.1
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -136,7 +136,7 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: 0.45.2
-        version: 0.45.2(@cloudflare/workers-types@5.20260825.1)
+        version: 0.45.2(@cloudflare/workers-types@5.20260904.1)
 
 packages:
 
@@ -271,8 +271,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@cloudflare/workers-types@5.20260825.1':
-    resolution: {integrity: sha512-/XZntbK+BlJWC5jxkaDNhnDLr2Bf2627sZ6VMrxqKrnc84pc6gNu5NdAyaTkZn1LzQVFIa3SL7V/7veLF59P7w==}
+  '@cloudflare/workers-types@5.20260904.1':
+    resolution: {integrity: sha512-SbulPvrdb4j5iISDr81Iw+YpNCG4Bb6xRqV3arkgn/Ib6STMaoG63lhPnuWqmZdakOn0qS1OUudBMdxtBFx0Jg==}
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
@@ -1919,7 +1919,7 @@ snapshots:
     optionalDependencies:
       workerd: 1.20260903.1
 
-  '@cloudflare/vitest-plugin@1.1.4(@cloudflare/workers-types@5.20260825.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(jsdom@30.0.1)(vite@8.2.2(esbuild@0.28.1)))':
+  '@cloudflare/vitest-plugin@1.1.4(@cloudflare/workers-types@5.20260904.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(jsdom@30.0.1)(vite@8.2.2(esbuild@0.28.1)))':
     dependencies:
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -1927,7 +1927,7 @@ snapshots:
       esbuild: 0.28.1
       miniflare: 5.20260903.0-alpha
       vitest: 4.1.11(jsdom@30.0.1)(vite@8.2.2(esbuild@0.28.1))
-      wrangler: 4.129.0(@cloudflare/workers-types@5.20260825.1)
+      wrangler: 4.129.0(@cloudflare/workers-types@5.20260904.1)
       zod: 4.4.3
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
@@ -1949,7 +1949,7 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20260903.1':
     optional: true
 
-  '@cloudflare/workers-types@5.20260825.1': {}
+  '@cloudflare/workers-types@5.20260904.1': {}
 
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
@@ -2651,9 +2651,9 @@ snapshots:
 
   dom-accessibility-api@0.5.16: {}
 
-  drizzle-orm@0.45.2(@cloudflare/workers-types@5.20260825.1):
+  drizzle-orm@0.45.2(@cloudflare/workers-types@5.20260904.1):
     optionalDependencies:
-      '@cloudflare/workers-types': 5.20260825.1
+      '@cloudflare/workers-types': 5.20260904.1
 
   entities@3.0.1: {}
 
@@ -3156,7 +3156,7 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260903.1
       '@cloudflare/workerd-windows-64': 1.20260903.1
 
-  wrangler@4.129.0(@cloudflare/workers-types@5.20260825.1):
+  wrangler@4.129.0(@cloudflare/workers-types@5.20260904.1):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260903.1)
@@ -3167,7 +3167,7 @@ snapshots:
       unenv: 2.0.0-rc.24
       workerd: 1.20260903.1
     optionalDependencies:
-      '@cloudflare/workers-types': 5.20260825.1
+      '@cloudflare/workers-types': 5.20260904.1
       fsevents: 2.3.3
     transitivePeerDependencies:
       - bufferutil
