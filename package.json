@@ -21,7 +21,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.13",
     "@cloudflare/vitest-plugin": "1.1.7",
-    "@cloudflare/workers-types": "5.20260906.1",
+    "@cloudflare/workers-types": "5.20260911.1",
     "typescript": "7.0.2",
     "vite": "8.2.2",
     "vitest": "4.1.11"
