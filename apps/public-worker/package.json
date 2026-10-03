@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "@tinycms/contracts": "workspace:*",
-    "hono": "4.13.10"
+    "hono": "4.13.12"
   }
 }
