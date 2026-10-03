@@ -57,8 +57,8 @@ importers:
         specifier: 5.3.0
         version: 5.3.0
       '@material-symbols/font-400':
-        specifier: 0.47.5
-        version: 0.47.5
+        specifier: 0.47.6
+        version: 0.47.6
       '@tinycms/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -666,8 +666,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
 
-  '@material-symbols/font-400@0.47.5':
-    resolution: {integrity: sha512-lB7FnJydPq+f5X254JTD/tdyLjtx8GmS/ieVKSAxNSgZNPasTE2xw52S/1x2XYE5eNEUa+lwjeyw17cpFOXGDw==}
+  '@material-symbols/font-400@0.47.6':
+    resolution: {integrity: sha512-T+v1rDipz/fMhsg3sUazUKU4OQp9shj8sM/GsNvx3Drm1s0BqUkeR7S33MaO8Q89TnuKzEUpIU9xB48mqQr3Fw==}
 
   '@oxc-project/types@0.151.0':
     resolution: {integrity: sha512-J1yXrIlNDZVzE3ada310xeAw7nH8yCAyLPuUIsjKatFPmfn5bS1oW+cM+QsGOtVWd5nhSpbwZWx/rue+r5Z+PA==}
@@ -2202,7 +2202,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@material-symbols/font-400@0.47.5': {}
+  '@material-symbols/font-400@0.47.6': {}
 
   '@oxc-project/types@0.151.0': {}
 
