@@ -54,8 +54,8 @@ importers:
   apps/studio:
     dependencies:
       '@fontsource/zen-kaku-gothic-antique':
-        specifier: 5.3.0
-        version: 5.3.0
+        specifier: 5.3.1
+        version: 5.3.1
       '@material-symbols/font-400':
         specifier: 0.47.6
         version: 0.47.6
@@ -489,8 +489,8 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@fontsource/zen-kaku-gothic-antique@5.3.0':
-    resolution: {integrity: sha512-vKvW7ecfBCf4ciuIy8C1cFoWNLIryAeu1Z7xxpeqSsYeSEi7sfHCcThp/h5E+mnm+o1zhFTzI3Z6YxzyXrLecQ==}
+  '@fontsource/zen-kaku-gothic-antique@5.3.1':
+    resolution: {integrity: sha512-uOKE2su12PHMGP10+8o+I+4iM3q+VNsPVBfsQoEOGI4d0TTNmTawJ7OVIdKRSrrSt4MPOGdubjLWM/4f5C/NKQ==}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -2077,7 +2077,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@fontsource/zen-kaku-gothic-antique@5.3.0': {}
+  '@fontsource/zen-kaku-gothic-antique@5.3.1': {}
 
   '@img/colour@1.1.0': {}
 
