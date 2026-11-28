@@ -23,6 +23,7 @@ backend = "npm:wrangler"
 [[tools.pnpm]]
 version = "11.24.0"
 backend = "aqua:pnpm/pnpm"
+unsupported_platforms = ["macos-x64"]
 
 [tools.pnpm."platforms.linux-x64"]
 checksum = "sha256:0a9b76dedb5fe8cc5e7f3a9fd70854181cfb08a487ebaf0c9cfb044dc860936c"
